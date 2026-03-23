@@ -1,0 +1,10 @@
+node_modules/
+dist/
+.env
+.env.local
+*.tsbuildinfo
+.vite/
+.claude/
+test-results/
+logs/
+.DS_Store
