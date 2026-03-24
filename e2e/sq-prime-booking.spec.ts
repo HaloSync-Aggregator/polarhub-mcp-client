@@ -16,13 +16,17 @@ const PROMPTS = {
 };
 
 for (const locale of ['en', 'ko'] as const) {
-  test(`SQ Prime Booking — instant ticketing (${locale})`, async ({ page, context }) => {
-    // Set browser locale
-    await context.grantPermissions([]);
-
+  test(`SQ Prime Booking — instant ticketing (${locale})`, async ({ browser }) => {
+    // Create context with browser locale
+    const context = await browser.newContext({
+      locale: locale === 'ko' ? 'ko-KR' : 'en-US',
+      viewport: { width: 1280, height: 720 },
+      recordVideo: { dir: 'test-results/' },
+    });
+    const page = await context.newPage();
     const wsLog = new WsLogger(page);
 
-    // Navigate with locale
+    // Navigate with locale query param (belt & suspenders)
     await page.goto(`/?locale=${locale}`);
     const chat = new ChatPage(page);
     await chat.waitForConnection();
@@ -60,5 +64,7 @@ for (const locale of ['en', 'ko'] as const) {
     wsLog.saveLog(`test-results/sq-prime-booking-${locale}-ws.json`);
 
     console.log(`[${locale}] ✅ SQ Prime Booking test completed`);
+
+    await context.close();
   });
 }

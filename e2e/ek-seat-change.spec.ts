@@ -31,9 +31,15 @@ const PROMPTS = {
 };
 
 for (const locale of ['en', 'ko'] as const) {
-  test(`EK Post-Booking Seat Purchase (${locale})`, async ({ page }) => {
+  test(`EK Post-Booking Seat Purchase (${locale})`, async ({ browser }) => {
     test.skip(!EK_ORDER_ID, 'EK_ORDER_ID env var not set — skipping');
 
+    const context = await browser.newContext({
+      locale: locale === 'ko' ? 'ko-KR' : 'en-US',
+      viewport: { width: 1280, height: 720 },
+      recordVideo: { dir: 'test-results/' },
+    });
+    const page = await context.newPage();
     const wsLog = new WsLogger(page);
     await page.goto(`/?locale=${locale}`);
     const chat = new ChatPage(page);
@@ -78,5 +84,7 @@ for (const locale of ['en', 'ko'] as const) {
     wsLog.saveLog(`test-results/ek-seat-change-${locale}-ws.json`);
 
     console.log(`[${locale}] ✅ EK Seat Change test completed`);
+
+    await context.close();
   });
 }

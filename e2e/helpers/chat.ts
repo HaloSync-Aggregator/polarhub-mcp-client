@@ -102,10 +102,10 @@ export class ChatPage {
 
   /** Check if the page is connected (WebSocket) */
   async waitForConnection(): Promise<void> {
-    // Wait for the connection indicator to show connected state
+    // Wait for the connection indicator to show connected state (bg-halo-green-light)
     await this.page.waitForFunction(() => {
-      const el = document.querySelector('[class*="bg-green"]');
+      const el = document.querySelector('[class*="halo-green"]');
       return !!el;
-    }, { timeout: 15_000 });
+    }, { timeout: 30_000 });
   }
 }

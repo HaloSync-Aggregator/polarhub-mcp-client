@@ -116,6 +116,16 @@ let detectedLocale: Locale | null = null;
 
 export function getLocale(): Locale {
   if (detectedLocale) return detectedLocale;
+  // Check URL query parameter first (?locale=ko)
+  if (typeof window !== 'undefined') {
+    const params = new URLSearchParams(window.location.search);
+    const qLocale = params.get('locale');
+    if (qLocale === 'ko' || qLocale === 'en') {
+      detectedLocale = qLocale;
+      return detectedLocale;
+    }
+  }
+  // Fallback to browser language
   const lang = typeof navigator !== 'undefined' ? navigator.language : 'en';
   detectedLocale = lang.startsWith('ko') ? 'ko' : 'en';
   return detectedLocale;
