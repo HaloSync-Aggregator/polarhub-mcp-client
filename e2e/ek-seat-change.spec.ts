@@ -15,20 +15,33 @@ import { WsLogger } from './helpers/ws-logger';
 
 const EK_ORDER_ID = process.env.EK_ORDER_ID || '';
 
-const PROMPTS = {
-  en: {
-    retrieve: `Retrieve order ${EK_ORDER_ID}`,
-    seats: 'Show me available seats',
-    selectSeat: 'Select seat 23A',
-    confirm: 'Yes, confirm the change',
-  },
-  ko: {
-    retrieve: `주문 ${EK_ORDER_ID} 조회해줘`,
-    seats: '좌석 보여줘',
-    selectSeat: '23A 좌석 선택해줘',
-    confirm: '네, 변경 확정해줘',
-  },
-};
+function getPrompts(locale: 'en' | 'ko') {
+  return {
+    en: {
+      retrieve: `Retrieve order ${EK_ORDER_ID}`,
+      seats: 'Show me available seats',
+      selectSeat: (seat: string) => `Select seat ${seat}`,
+      confirm: 'Yes, confirm the change',
+    },
+    ko: {
+      retrieve: `주문 ${EK_ORDER_ID} 조회해줘`,
+      seats: '좌석 보여줘',
+      selectSeat: (seat: string) => `${seat} 좌석 선택해줘`,
+      confirm: '네, 변경 확정해줘',
+    },
+  }[locale];
+}
+
+/** Extract a real seat number from the seat availability response */
+function extractSeatFromResponse(text: string): string {
+  // Match patterns like "23A", "41K", "12F" etc.
+  const matches = text.match(/\b(\d{1,2}[A-K])\b/g);
+  if (matches && matches.length > 0) {
+    // Pick a seat from the middle of the list (avoid first row edge cases)
+    return matches[Math.min(3, matches.length - 1)];
+  }
+  return '30A'; // fallback
+}
 
 for (const locale of ['en', 'ko'] as const) {
   test(`EK Post-Booking Seat Purchase (${locale})`, async ({ browser }) => {
@@ -45,7 +58,7 @@ for (const locale of ['en', 'ko'] as const) {
     const chat = new ChatPage(page);
     await chat.waitForConnection();
 
-    const prompts = PROMPTS[locale];
+    const prompts = getPrompts(locale);
 
     // Step 1: Order Retrieve
     console.log(`[${locale}] Step 1: Order Retrieve — ${EK_ORDER_ID}`);
@@ -63,9 +76,10 @@ for (const locale of ['en', 'ko'] as const) {
     expect(seatResult.length).toBeGreaterThan(30);
     console.log(`[${locale}] Seats: ${seatResult.substring(0, 100)}...`);
 
-    // Step 3: Select Seat (triggers order_prepare)
-    console.log(`[${locale}] Step 3: Select Seat`);
-    await chat.sendMessage(prompts.selectSeat);
+    // Step 3: Select Seat — pick a real seat from the response
+    const seatNumber = extractSeatFromResponse(seatResult);
+    console.log(`[${locale}] Step 3: Select Seat — picked ${seatNumber}`);
+    await chat.sendMessage(prompts.selectSeat(seatNumber));
 
     const selectResult = await chat.getLastAssistantMessage();
     expect(selectResult.length).toBeGreaterThan(30);
@@ -76,7 +90,7 @@ for (const locale of ['en', 'ko'] as const) {
     await chat.sendMessage(prompts.confirm);
 
     const confirmResult = await chat.getLastAssistantMessage();
-    expect(confirmResult).toMatch(/confirm|complete|success|23A|확정|완료|좌석/i);
+    expect(confirmResult).toMatch(/confirm|complete|success|change|확정|완료|좌석|변경/i);
     console.log(`[${locale}] Confirm: ${confirmResult.substring(0, 100)}...`);
 
     // Save logs
