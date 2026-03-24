@@ -300,13 +300,11 @@ Tool 이름, 파라미터, 설명이 전부 MCP 서버에서 옵니다. 새 Tool
 ### 사전 준비
 
 - **Node.js** >= 18
-- **PolarHub MCP Server** 실행 중 (로컬 또는 Gateway)
+- **PolarHub MCP Server** Endpoint 및 인증정보
 - **LLM API 키** (아래 중 택 1)
   - OpenAI API Key (`sk-...`)
   - Google Gemini API Key
   - Bedrock API Key (`BEDROCK_API_KEY`, Bearer Token 방식)
-
-> `.env.example`은 기본적으로 **AgentCore Gateway 연결 + HMAC 활성화** 구성을 사용합니다. 로컬 MCP 서버를 붙일 때만 `MCP_SERVER_URL`과 `MCP_GATEWAY_HMAC_ENABLED`를 함께 바꾸면 됩니다.
 
 ### 설치 및 실행
 
@@ -325,11 +323,10 @@ cp .env.example .env
 LLM_PROVIDER=gemini
 GEMINI_API_KEY=your-gemini-api-key-here
 
-# MCP 서버: 기본값이 AgentCore Gateway를 가리킴 (변경 불필요)
-# MCP_SERVER_URL은 .env.example에서 이미 설정됨
+# MCP 서버 엔드포인트
+MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp
 
 # PolarHub 인증 (필수 — 관리자에게 발급받으세요)
-POLARHUB_API_BASE_URL=https://polarhub.sandbox.halo-platform.net
 POLARHUB_TENANT_ID=your-tenant-id
 POLARHUB_API_SECRET=your-base64-secret
 ```
@@ -369,8 +366,7 @@ curl http://localhost:3000/health
 | 변수 | 설명 | 예시 |
 |------|------|------|
 | `LLM_PROVIDER` | LLM 제공자 | `openai`, `gemini`, `bedrock` |
-| `MCP_SERVER_URL` | MCP 서버 엔드포인트 | `http://localhost:8000/mcp` |
-| `POLARHUB_API_BASE_URL` | PolarHub API URL | `https://polarhub.sandbox.halo-platform.net` |
+| `MCP_SERVER_URL` | MCP 서버 엔드포인트 | `https://mcp.sandbox.halo-platform.net/mcp` |
 | `POLARHUB_TENANT_ID` | 에이전시/테넌트 ID | (발급 필요) |
 | `POLARHUB_API_SECRET` | API 시크릿 (Base64) | (발급 필요) |
 
@@ -393,49 +389,7 @@ curl http://localhost:3000/health
 | 변수 | 기본값 | 설명 |
 |------|--------|------|
 | `PORT` | `3000` | 서버 포트 |
-| `POLARHUB_SITE_CODE` | `01` | 사이트 코드 |
-| `POLARHUB_AGENCY_CONTACT_ID` | `CTC_TA1` | 에이전시 연락처 ID |
-| `MCP_GATEWAY_HMAC_ENABLED` | `true` | Gateway HMAC 인증 모드 |
-| `MCP_GATEWAY_AGENCY_ID` | (TENANT_ID) | HMAC 에이전시 ID |
 | `DEBUG_PROMPTS` | `false` | LLM 프롬프트 콘솔 출력 |
-
----
-
-## MCP 서버 연결
-
-이 클라이언트는 MCP 서버에 **Streamable HTTP** transport로 연결합니다.
-PolarHub 인증 정보를 `X-PolarHub-*` HTTP 헤더로 MCP 서버에 전달합니다 (pass-through).
-브라우저는 PolarHub 시크릿을 직접 알 필요가 없고, **Node 서버가 환경 변수에서 읽어 MCP 서버로 전달**합니다.
-
-### 기본 설정: Gateway (AgentCore)
-
-`.env.example`의 기본값은 **AgentCore Gateway**를 가리킵니다. PolarHub 인증 정보만 설정하면 바로 사용 가능합니다:
-
-```
-MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp
-MCP_GATEWAY_HMAC_ENABLED=true
-```
-
-이 모드에서는 클라이언트가 매 요청마다 HMAC-SHA512 서명을 생성하여 Gateway에 전달합니다.
-
-### 로컬 개발 모드 (MCP 서버 코드 수정 시)
-
-MCP 서버 코드를 직접 수정/디버깅할 때만 로컬 모드를 사용합니다:
-
-```bash
-# 터미널 1: MCP 서버 실행
-cd /path/to/polarhub-mcp-server
-npm run dev        # http://localhost:8000
-
-# 터미널 2: 이 클라이언트 실행
-npm run dev        # http://localhost:3000
-```
-
-```
-.env:
-MCP_SERVER_URL=http://localhost:8000/mcp
-MCP_GATEWAY_HMAC_ENABLED=false
-```
 
 ---
 
@@ -447,7 +401,7 @@ MCP_GATEWAY_HMAC_ENABLED=false
 | `/mcp` | GET | SSE 스트림 (서버→클라이언트 알림) |
 | `/mcp` | DELETE | 세션 종료 |
 | `/health` | GET | 헬스체크 |
-| `/ping` | GET | AgentCore Gateway 프로브 |
+| `/ping` | GET | 헬스체크 프로브 |
 
 **세션 관리:**
 - 서버가 `Mcp-Session-Id` 응답 헤더로 세션 ID 발급
@@ -456,59 +410,14 @@ MCP_GATEWAY_HMAC_ENABLED=false
 
 ---
 
-## Credential Pass-through 헤더
+## MCP Server 인증 방식
 
-MCP 서버는 credential-free로 배포 가능합니다. 클라이언트가 HTTP 헤더로 인증 정보를 전달합니다:
-
-| Header | 필수 | 설명 |
-|--------|:----:|------|
-| `X-PolarHub-Tenant-ID` | ✅ | 테넌트/에이전시 ID |
-| `X-PolarHub-API-Secret` | ✅ | API 시크릿 (Base64) |
-| `X-PolarHub-Base-URL` | | PolarHub API 기본 URL (미전송 시 서버 `.env` fallback) |
-| `X-PolarHub-Site-Code` | | 사이트 코드 (기본: `01`) |
-| `X-PolarHub-Agency-Contact-ID` | | 연락처 ID (기본: `CTC_TA1`) |
-
-헤더가 없으면 `.env` 환경변수를 fallback으로 사용합니다 (로컬 개발용).
-
----
-
-## Gateway 인증 방식
-
-AgentCore Gateway Lambda Interceptor는 아래 2가지 인증 경로를 지원합니다.
-
-### 1. 정적 헤더 인증 (권장)
-
-정적 헤더를 보낼 수 있는 MCP 클라이언트는 아래 헤더만 보내면 됩니다.
+MCP Server에 정적 헤더로 인증 정보를 전달합니다. 환경 변수로 설정된 값이 자동으로 헤더에 포함됩니다.
 
 ```text
 X-PolarHub-Tenant-ID: {tenantId}
 X-PolarHub-API-Secret: {base64_secret}
-X-PolarHub-Base-URL: https://polarhub.sandbox.halo-platform.net
-X-PolarHub-Site-Code: 01
-X-PolarHub-Agency-Contact-ID: CTC_TA1
 ```
-
-Interceptor Lambda 동작:
-1. `X-PolarHub-Tenant-ID`, `X-PolarHub-API-Secret` 존재 여부 확인
-2. 요청 body 기준으로 내부 HMAC 헤더(`Authorization`, `x-date`, `digest`) 합성
-3. 기존 HMAC 검증 경로와 동일하게 검증
-4. 성공 시 `_tenantId`를 `params.arguments`에 주입하여 Runtime으로 전달
-
-### 2. HMAC-SHA512 직접 인증 (demo / 커스텀 클라이언트)
-
-```
-Authorization: hmac username="agency_id",algorithm="hmac-sha512",headers="x-date digest",signature="base64_hmac_sig"
-X-Date: RFC1123 timestamp (±120초 이내)
-Digest: SHA-512=base64(sha512(JSON.stringify({ AgencyID, Request: bodyRaw })))
-```
-
-**서명 생성 순서:**
-1. 요청 body를 raw string으로 준비
-2. `{ AgencyID: tenantId, Request: bodyRaw }`를 JSON.stringify → SHA-512 해시 → Base64 = `Digest`
-3. `"x-date: {xDate}\ndigest: {digest}"`를 HMAC-SHA512 서명 (secret은 Base64 디코딩 후 사용) → Base64 = `signature`
-4. Authorization 헤더 조립
-
-> 정리: Cursor, Codex 등 정적 헤더를 보낼 수 있는 MCP 클라이언트는 정적 헤더 인증 경로를 사용하고, demo 같은 커스텀 클라이언트는 기존 HMAC 직접 서명 방식을 계속 사용하면 됩니다.
 
 ---
 
@@ -588,7 +497,7 @@ URI 기반 데이터 조회. Tool과 달리 파라미터 없이 URI만으로 접
 |----------|------|----------|
 | `POLARHUB_TENANT_ID` | 에이전시 식별자 | PolarHub 관리자에게 요청 |
 | `POLARHUB_API_SECRET` | HMAC 서명용 시크릿 (Base64) | PolarHub 관리자에게 요청 |
-| `POLARHUB_API_BASE_URL` | API 엔드포인트 | Sandbox: `https://polarhub.sandbox.halo-platform.net` |
+| `POLARHUB_API_BASE_URL` | API 엔드포인트 | Sandbox: `https://mcp.sandbox.halo-platform.net/mcp` |
 
 > Sandbox 환경은 테스트용이며, 실제 항공편 예약이 이루어지지 않습니다.
 >
