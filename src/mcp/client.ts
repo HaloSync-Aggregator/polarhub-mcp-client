@@ -1,15 +1,12 @@
 /**
  * MCP Client Manager
  *
- * v4: Streamable HTTP + PolarHub Auth Pass-through
+ * Streamable HTTP + PolarHub Auth Pass-through
  *
- * 변경 사항:
- * - SSE → Streamable HTTP transport
- * - PolarHub credentials를 커스텀 HTTP 헤더로 MCP 서버에 전달
- * - MCP 서버가 credential-free Docker 이미지로 배포 가능
+ * PolarHub 인증 정보를 정적 HTTP 헤더로 MCP 서버에 전달:
+ * - X-PolarHub-Tenant-ID + X-PolarHub-API-Secret
  */
 
-import { createHmac, createHash } from 'crypto';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
@@ -76,46 +73,18 @@ export class MCPClientManager {
     console.log('MCP server URL:', config.mcp.serverUrl);
 
     try {
-      // Build custom headers for PolarHub auth pass-through
+      // Build static auth headers for PolarHub pass-through
       const headers: Record<string, string> = {};
-      if (config.polarhub.baseUrl) {
-        headers['X-PolarHub-Base-URL'] = config.polarhub.baseUrl;
-      }
       if (config.polarhub.tenantId) {
         headers['X-PolarHub-Tenant-ID'] = config.polarhub.tenantId;
       }
       if (config.polarhub.apiSecret) {
         headers['X-PolarHub-API-Secret'] = config.polarhub.apiSecret;
       }
-      if (config.polarhub.siteCode) {
-        headers['X-PolarHub-Site-Code'] = config.polarhub.siteCode;
-      }
-      if (config.polarhub.agencyContactId) {
-        headers['X-PolarHub-Agency-Contact-ID'] = config.polarhub.agencyContactId;
-      }
-
-      // Gateway HMAC mode: custom fetch that signs every request body
-      const transportOptions: ConstructorParameters<typeof StreamableHTTPClientTransport>[1] = config.mcp.gatewayHmacEnabled
-        ? {
-            requestInit: { headers },
-            fetch: async (url: string | URL | Request, init?: RequestInit) => {
-              const body = typeof init?.body === 'string' ? init.body : '';
-              const hmacHeaders = buildGatewayHmacHeaders(body);
-              // SDK headers first, then HMAC headers last (HMAC must win for Authorization)
-              const sdkHeaders = init?.headers instanceof Headers
-                ? Object.fromEntries(init.headers.entries())
-                : (init?.headers as Record<string, string>) ?? {};
-              const mergedHeaders = { ...headers, ...sdkHeaders, ...hmacHeaders };
-              return globalThis.fetch(url, { ...init, headers: mergedHeaders });
-            },
-          }
-        : {
-            requestInit: { headers },
-          };
 
       this.transport = new StreamableHTTPClientTransport(
         new URL(config.mcp.serverUrl),
-        transportOptions,
+        { requestInit: { headers } },
       );
 
       this.client = new Client({
@@ -282,30 +251,6 @@ export class MCPClientManager {
   getToolByName(name: string): MCPTool | undefined {
     return this.tools.find(t => t.name === name);
   }
-}
-
-/**
- * Build Gateway HMAC headers for AgentCore Gateway authentication.
- * Protocol: SHA-512 digest + HMAC-SHA512 signature.
- */
-function buildGatewayHmacHeaders(body: string): Record<string, string> {
-  const agencyId = config.mcp.gatewayAgencyId;
-  const secretBase64 = config.polarhub.apiSecret;
-  if (!agencyId || !secretBase64) return {};
-
-  const xDate = new Date().toUTCString();
-  const targetData = JSON.stringify({ AgencyID: agencyId, Request: body });
-  const digest = `SHA-512=${createHash('sha512').update(targetData).digest('base64')}`;
-  const sigString = `x-date: ${xDate}\ndigest: ${digest}`;
-  const signature = createHmac('sha512', Buffer.from(secretBase64, 'base64'))
-    .update(sigString)
-    .digest('base64');
-
-  return {
-    'x-date': xDate,
-    'Digest': digest,
-    'Authorization': `hmac username="${agencyId}", algorithm="hmac-sha512", headers="x-date digest", signature="${signature}"`,
-  };
 }
 
 // Singleton instance

@@ -3,9 +3,8 @@
  *
  * Streamable HTTP + PolarHub Auth Pass-through
  *
- * Demo 서버가 PolarHub 인증 정보를 MCP 서버에 HTTP 헤더로 전달:
- * - PolarHub credentials → X-PolarHub-* 커스텀 헤더
- * - MCP 서버는 credential-free Docker 이미지로 배포 가능
+ * Demo 서버가 PolarHub 인증 정보를 MCP 서버에 정적 HTTP 헤더로 전달:
+ * - X-PolarHub-Tenant-ID + X-PolarHub-API-Secret
  */
 
 import { config as dotenvConfig } from 'dotenv';
@@ -39,15 +38,10 @@ export interface Config {
   };
   mcp: {
     serverUrl: string;
-    gatewayHmacEnabled: boolean;
-    gatewayAgencyId: string;
   };
   polarhub: {
-    baseUrl: string;
     tenantId: string;
     apiSecret: string;
-    siteCode: string;
-    agencyContactId: string;
   };
 }
 
@@ -73,15 +67,10 @@ export const config: Config = {
   },
   mcp: {
     serverUrl: process.env.MCP_SERVER_URL ?? 'https://mcp.sandbox.halo-platform.net/mcp',
-    gatewayHmacEnabled: process.env.MCP_GATEWAY_HMAC_ENABLED !== 'false',
-    gatewayAgencyId: process.env.MCP_GATEWAY_AGENCY_ID ?? process.env.POLARHUB_TENANT_ID ?? '',
   },
   polarhub: {
-    baseUrl: process.env.POLARHUB_API_BASE_URL ?? '',
     tenantId: process.env.POLARHUB_TENANT_ID ?? '',
     apiSecret: process.env.POLARHUB_API_SECRET ?? '',
-    siteCode: process.env.POLARHUB_SITE_CODE ?? '01',
-    agencyContactId: process.env.POLARHUB_AGENCY_CONTACT_ID ?? 'CTC_TA1',
   },
 };
 

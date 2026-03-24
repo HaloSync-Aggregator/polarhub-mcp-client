@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 480 520" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif">
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto">
+      <polygon points="0 0, 8 3, 0 6" fill="#9ca3af"/>
+    </marker>
+  </defs>
+
+  <!-- User -->
+  <rect x="120" y="16" width="240" height="52" rx="8" fill="#f9fafb" stroke="#d1d5db" stroke-width="1.2"/>
+  <text x="240" y="39" text-anchor="middle" font-size="13" font-weight="600" fill="#030711">User (Browser)</text>
+  <text x="240" y="56" text-anchor="middle" font-size="11" fill="#6b7280">Natural language input</text>
+
+  <!-- Arrow 1 -->
+  <line x1="240" y1="68" x2="240" y2="112" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <text x="250" y="96" font-size="10" fill="#9ca3af" font-style="italic">"Search flights..."</text>
+
+  <!-- MCP Client -->
+  <rect x="40" y="112" width="400" height="120" rx="8" fill="#faf8ff" stroke="#6442d6" stroke-width="1.2"/>
+  <text x="240" y="138" text-anchor="middle" font-size="13" font-weight="600" fill="#6442d6">PolarHub MCP Client</text>
+  <line x1="80" y1="148" x2="400" y2="148" stroke="#e9e5f5" stroke-width="0.8"/>
+  <text x="240" y="170" text-anchor="middle" font-size="12" fill="#374151">LLM parses user intent</text>
+  <text x="240" y="190" text-anchor="middle" font-size="12" fill="#374151">Calls appropriate MCP Tool</text>
+  <text x="240" y="210" text-anchor="middle" font-size="12" fill="#374151">Summarizes results for the user</text>
+
+  <!-- Arrow 2 -->
+  <line x1="240" y1="232" x2="240" y2="286" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow)"/>
+  <rect x="132" y="248" width="216" height="20" rx="3" fill="#f3f4f6" stroke="#e5e7eb" stroke-width="0.8"/>
+  <text x="240" y="262" text-anchor="middle" font-size="10" fill="#6b7280">MCP Protocol (Streamable HTTP)</text>
+
+  <!-- MCP Server -->
+  <rect x="40" y="286" width="400" height="120" rx="8" fill="#f8faf9" stroke="#21a35d" stroke-width="1.2"/>
+  <text x="240" y="312" text-anchor="middle" font-size="13" font-weight="600" fill="#1a7a44">PolarHub MCP Server</text>
+  <line x1="80" y1="322" x2="400" y2="322" stroke="#d5eddf" stroke-width="0.8"/>
+  <text x="240" y="344" text-anchor="middle" font-size="12" fill="#374151">Provides 15 MCP Tools</text>
+  <text x="240" y="364" text-anchor="middle" font-size="12" fill="#374151">Integrates with PolarHub NDC API</text>
+  <text x="240" y="384" text-anchor="middle" font-size="12" fill="#374151">Handles airline-specific patterns</text>
+
+  <!-- Arrow 3 -->
+  <line x1="240" y1="406" x2="240" y2="450" stroke="#9ca3af" stroke-width="1.2" marker-end="url(#arrow)"/>
+
+  <!-- NDC API -->
+  <rect x="90" y="450" width="300" height="50" rx="8" fill="#f9fafb" stroke="#d1d5db" stroke-width="1.2"/>
+  <text x="240" y="473" text-anchor="middle" font-size="13" font-weight="600" fill="#030711">PolarHub NDC API</text>
+  <text x="240" y="490" text-anchor="middle" font-size="11" fill="#6b7280">40+ Airlines</text>
+</svg>
