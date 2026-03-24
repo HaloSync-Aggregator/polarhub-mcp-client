@@ -499,13 +499,13 @@ curl http://localhost:3000/health
 
 The full flow of searching flights with natural language, selecting an offer, entering passenger details, and completing the booking.
 
-https://github.com/HaloSync-Aggregator/polarhub-mcp-client/raw/main/demos/demo-prime-booking-SQ.mp4
+<video src="demos/demo-prime-booking-SQ.mp4" controls width="100%"></video>
 
 ### Post-Booking — Order Retrieve → Seat Change (EK)
 
 Retrieving an existing booking, viewing the seat map, changing the seat, and re-verifying the order.
 
-https://github.com/HaloSync-Aggregator/polarhub-mcp-client/raw/main/demos/demo-seat-change-EK.mp4
+<video src="demos/demo-seat-change-EK.mp4" controls width="100%"></video>
 
 > Videos are edited at 3x speed from actual demos.
 
