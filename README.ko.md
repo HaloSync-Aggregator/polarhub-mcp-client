@@ -451,18 +451,26 @@ URI 기반 데이터 조회. Tool과 달리 파라미터 없이 URI만으로 접
 
 ---
 
-## PolarHub 인증 정보 발급
+## 온보딩 및 인증 정보
 
 이 클라이언트를 실행하려면 PolarHub NDC 플랫폼 계정이 필요합니다.
 
+### 접근 권한 받기
+
+**contact@halosync.kr** 로 회사명과 사용 목적을 포함하여 온보딩 요청 메일을 보내주세요. Sandbox 인증 정보를 발급해드립니다.
+
+> 자동화된 셀프 서비스 온보딩은 현재 준비 중입니다.
+
+### 필요한 인증 정보
+
 | 필요 정보 | 설명 | 발급 방법 |
 |----------|------|----------|
-| `POLARHUB_TENANT_ID` | 에이전시 식별자 | PolarHub 관리자에게 요청 |
-| `POLARHUB_API_SECRET` | API 시크릿 (Base64) | PolarHub 관리자에게 요청 |
+| `POLARHUB_TENANT_ID` | 에이전시 식별자 | 온보딩 후 발급 |
+| `POLARHUB_API_SECRET` | API 시크릿 (Base64) | 온보딩 후 발급 |
 
 > Sandbox 환경은 테스트용이며, 실제 항공편 예약이 이루어지지 않습니다.
 >
-> 📌 계정 발급 → [HaloSync](https://halosync.kr/) &nbsp;|&nbsp; API 문서 → [Halo Platform Docs](https://doc.halo-platform.net/)
+> [HaloSync](https://halosync.kr/) &nbsp;|&nbsp; [API 문서](https://doc.halo-platform.net/)
 
 ---
 
@@ -579,13 +587,13 @@ curl http://localhost:3000/health
 
 자연어로 항공편을 검색하고, 오퍼를 선택하고, 승객 정보를 입력하여 예약을 완료하는 전체 흐름입니다.
 
-<video src="demos/demo-prime-booking-SQ.mp4" controls width="100%"></video>
+https://github.com/HaloSync-Aggregator/polarhub-mcp-client/raw/main/demos/demo-prime-booking-SQ.mp4
 
 ### Post-Booking — 예약 조회 → 좌석 변경 (EK)
 
 기존 예약을 조회하고, 좌석 배치도를 확인한 뒤, 좌석을 변경하고 재확인하는 흐름입니다.
 
-<video src="demos/demo-seat-change-EK.mp4" controls width="100%"></video>
+https://github.com/HaloSync-Aggregator/polarhub-mcp-client/raw/main/demos/demo-seat-change-EK.mp4
 
 > 영상은 실제 데모를 3배속으로 편집한 것입니다.
 

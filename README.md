@@ -365,18 +365,26 @@ X-PolarHub-API-Secret: {base64_secret}
 
 ---
 
-## PolarHub Credentials
+## Onboarding & Credentials
 
 You need a PolarHub NDC platform account to run this client.
 
+### How to get access
+
+Send an onboarding request to **contact@halosync.kr** with your company name and use case. The team will issue your Sandbox credentials.
+
+> Automated self-service onboarding is currently in progress.
+
+### Required credentials
+
 | Required | Description | How to Get |
 |----------|-------------|------------|
-| `POLARHUB_TENANT_ID` | Agency identifier | Request from PolarHub admin |
-| `POLARHUB_API_SECRET` | API secret (Base64) | Request from PolarHub admin |
+| `POLARHUB_TENANT_ID` | Agency identifier | Issued after onboarding |
+| `POLARHUB_API_SECRET` | API secret (Base64) | Issued after onboarding |
 
 > The Sandbox environment is for testing only — no real flight bookings are made.
 >
-> 📌 Account setup → [HaloSync](https://halosync.kr/) &nbsp;|&nbsp; API docs → [Halo Platform Docs](https://doc.halo-platform.net/)
+> [HaloSync](https://halosync.kr/) &nbsp;|&nbsp; [API Docs](https://doc.halo-platform.net/)
 
 ---
 
@@ -491,13 +499,13 @@ curl http://localhost:3000/health
 
 The full flow of searching flights with natural language, selecting an offer, entering passenger details, and completing the booking.
 
-<video src="demos/demo-prime-booking-SQ.mp4" controls width="100%"></video>
+https://github.com/HaloSync-Aggregator/polarhub-mcp-client/raw/main/demos/demo-prime-booking-SQ.mp4
 
 ### Post-Booking — Order Retrieve → Seat Change (EK)
 
 Retrieving an existing booking, viewing the seat map, changing the seat, and re-verifying the order.
 
-<video src="demos/demo-seat-change-EK.mp4" controls width="100%"></video>
+https://github.com/HaloSync-Aggregator/polarhub-mcp-client/raw/main/demos/demo-seat-change-EK.mp4
 
 > Videos are edited at 3x speed from actual demos.
 
