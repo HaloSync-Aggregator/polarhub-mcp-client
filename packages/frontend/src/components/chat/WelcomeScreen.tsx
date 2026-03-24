@@ -4,6 +4,7 @@
  */
 
 import { Plane, Armchair, ClipboardList, Sparkles } from 'lucide-react';
+import { tf } from '../../i18n';
 
 interface SuggestionCardProps {
   icon: React.ReactNode;
@@ -39,21 +40,21 @@ export function WelcomeScreen({ onSuggestionClick }: WelcomeScreenProps) {
   const suggestions = [
     {
       icon: <Plane size={20} />,
-      title: '항공편 검색',
-      description: '"서울에서 도쿄로 3월 15일 항공편 검색해줘"',
-      message: '서울에서 도쿄로 3월 15일 성인 1명 항공편 검색해줘',
+      title: tf('welcome.suggestion.flight.title'),
+      description: tf('welcome.suggestion.flight.description'),
+      message: tf('welcome.suggestion.flight.message'),
     },
     {
       icon: <Armchair size={20} />,
-      title: '좌석 선택',
-      description: '"창가 좌석으로 선택해줘"',
-      message: '좌석 배치도를 보여줘',
+      title: tf('welcome.suggestion.seat.title'),
+      description: tf('welcome.suggestion.seat.description'),
+      message: tf('welcome.suggestion.seat.message'),
     },
     {
       icon: <ClipboardList size={20} />,
-      title: '예약 조회',
-      description: '"예약번호 ABC123 조회해줘"',
-      message: '예약 내역을 조회하고 싶어',
+      title: tf('welcome.suggestion.booking.title'),
+      description: tf('welcome.suggestion.booking.description'),
+      message: tf('welcome.suggestion.booking.message'),
     },
   ];
 
@@ -68,15 +69,15 @@ export function WelcomeScreen({ onSuggestionClick }: WelcomeScreenProps) {
       <div className="text-center mb-10 max-w-lg">
         <div className="inline-flex items-center gap-2 bg-halo-purple-light text-halo-purple px-4 py-1.5 rounded-full text-sm font-medium mb-4">
           <Sparkles size={14} />
-          AI-Powered Flight Booking
+          {tf('welcome.badge')}
         </div>
         <h1 className="text-3xl font-bold text-text-primary mb-3">
-          무엇을 도와드릴까요?
+          {tf('welcome.title')}
         </h1>
         <p className="text-text-secondary text-lg">
-          자연어로 항공편을 검색하고 예약할 수 있습니다.
+          {tf('welcome.description')}
           <br />
-          아래 예시를 클릭하거나 직접 입력해보세요.
+          {tf('welcome.description2')}
         </p>
       </div>
 
@@ -95,9 +96,9 @@ export function WelcomeScreen({ onSuggestionClick }: WelcomeScreenProps) {
 
       {/* Footer note */}
       <p className="mt-10 text-xs text-text-muted text-center max-w-md">
-        HaloSync Flight Assistant는 NDC 기반 항공 예약 플랫폼과 연동되어 있습니다.
+        {tf('welcome.footer1')}
         <br />
-        실제 예약은 진행되지 않습니다.
+        {tf('welcome.footer2')}
       </p>
     </div>
   );

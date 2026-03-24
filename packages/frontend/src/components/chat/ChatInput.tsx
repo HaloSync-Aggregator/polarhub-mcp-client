@@ -4,6 +4,7 @@
 
 import { useState, useRef, useEffect } from 'react';
 import { Send, Paperclip, Mic } from 'lucide-react';
+import { tf } from '../../i18n';
 
 interface ChatInputProps {
   onSend: (message: string) => void;
@@ -14,7 +15,7 @@ interface ChatInputProps {
 export function ChatInput({
   onSend,
   disabled = false,
-  placeholder = '메시지를 입력하세요...',
+  placeholder = tf('chat.placeholder'),
 }: ChatInputProps) {
   const [message, setMessage] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -54,7 +55,7 @@ export function ChatInput({
           {/* Attachment button (future feature) */}
           <button
             className="p-2 text-text-muted hover:text-halo-purple hover:bg-halo-purple-light rounded-lg transition-colors"
-            title="파일 첨부 (준비 중)"
+            title={tf('chat.attachFile')}
             disabled
           >
             <Paperclip size={18} />
@@ -83,7 +84,7 @@ export function ChatInput({
           {/* Voice input button (future feature) */}
           <button
             className="p-2 text-text-muted hover:text-halo-purple hover:bg-halo-purple-light rounded-lg transition-colors"
-            title="음성 입력 (준비 중)"
+            title={tf('chat.voiceInput')}
             disabled
           >
             <Mic size={18} />
@@ -107,7 +108,7 @@ export function ChatInput({
           </button>
         </div>
         <p className="text-xs text-text-muted mt-2 text-center">
-          Enter로 전송, Shift+Enter로 줄바꿈
+          {tf('chat.sendHint')}
         </p>
       </div>
     </div>

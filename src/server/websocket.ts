@@ -17,10 +17,13 @@ import {
   type ServerMessage,
 } from '../shared/index.js';
 import { orchestrator } from '../orchestrator/index.js';
+import { parseLocale, type Locale } from '../i18n/types.js';
+import { config } from '../config/index.js';
 
 interface ClientConnection {
   ws: WebSocket;
   sessionId: string; // WebSocket session ID
+  locale: Locale; // Detected from query param / Accept-Language / default
   mcpMetadata?: Record<string, unknown>; // MCP server metadata (from tool results)
 }
 
@@ -36,7 +39,7 @@ export class WebSocketHandler {
     this.wss = new WebSocketServer({ noServer: true });
 
     httpServer.on('upgrade', (request, socket, head) => {
-      if (request.url === '/ws') {
+      if (request.url?.startsWith('/ws')) {
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
           this.wss!.emit('connection', ws, request);
         });
@@ -62,11 +65,19 @@ export class WebSocketHandler {
     console.log(`WebSocket server started on port ${port}`);
   }
 
-  private handleConnection(ws: WebSocket, _req: IncomingMessage): void {
+  private handleConnection(ws: WebSocket, req: IncomingMessage): void {
     const sessionId = generateMessageId();
+
+    // Detect locale: query param > Accept-Language header > config default
+    const url = new URL(req.url || '/ws', 'http://localhost');
+    const qLocale = url.searchParams.get('locale');
+    const acceptLang = req.headers['accept-language'];
+    const locale = parseLocale(qLocale || acceptLang || null, config.locale.default);
+
     const clientConnection: ClientConnection = {
       ws,
       sessionId,
+      locale,
     };
 
     this.clients.set(sessionId, clientConnection);
@@ -159,7 +170,7 @@ export class WebSocketHandler {
 
       // Send tool_call_start before processing (so frontend can show loading state)
       // We don't know the tool name yet, but the id is generated for pairing with tool_call_end
-      const result = await orchestrator.processMessage(sessionId, content);
+      const result = await orchestrator.processMessage(sessionId, content, client.locale);
 
       // v3: 범용 metadata 저장 (sessionId 등 포함)
       if (result.metadata) {
@@ -221,7 +232,8 @@ export class WebSocketHandler {
       const result = await orchestrator.processAction(
         sessionId,
         action,
-        enrichedPayload
+        enrichedPayload,
+        client.locale
       );
 
       if (result.metadata) {

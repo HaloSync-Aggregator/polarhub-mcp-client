@@ -10,6 +10,7 @@
 import { config as dotenvConfig } from 'dotenv';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
+import { parseLocale, type Locale } from '../i18n/types.js';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,9 @@ export interface Config {
     tenantId: string;
     apiSecret: string;
   };
+  locale: {
+    default: Locale;
+  };
 }
 
 export const config: Config = {
@@ -71,6 +75,9 @@ export const config: Config = {
   polarhub: {
     tenantId: process.env.POLARHUB_TENANT_ID ?? '',
     apiSecret: process.env.POLARHUB_API_SECRET ?? '',
+  },
+  locale: {
+    default: parseLocale(process.env.DEFAULT_LOCALE, 'en'),
   },
 };
 

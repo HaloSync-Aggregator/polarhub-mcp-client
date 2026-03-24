@@ -11,6 +11,7 @@
 
 import { mcpClient, type MCPToolResult } from '../mcp/client.js';
 import { createLLMProvider, type LLMProvider, type ConversationContext } from '../llm/index.js';
+import { t, getActionDescription, type Locale } from '../i18n/index.js';
 
 export interface OrchestratorResult {
   message: string;
@@ -177,13 +178,15 @@ export class Orchestrator {
    */
   async processMessage(
     sessionId: string,
-    userMessage: string
+    userMessage: string,
+    locale?: Locale
   ): Promise<OrchestratorResult> {
     let context = this.conversationContext.get(sessionId);
     if (!context) {
-      context = { history: [] };
+      context = { history: [], locale };
       this.conversationContext.set(sessionId, context);
     }
+    if (locale) context.locale = locale;
 
     context.history.push({
       role: 'user',
@@ -261,7 +264,7 @@ export class Orchestrator {
           context.mcpSessionId = undefined;
           console.log('[Orchestrator] Cleared expired mcpSessionId');
           return {
-            message: '세션이 만료되었습니다. 다시 검색해주세요.',
+            message: t(context.locale ?? 'en', 'errors.sessionExpired'),
             toolCalled: intent.tool,
             toolSuccess: false,
             error: errorMessage,
@@ -269,7 +272,7 @@ export class Orchestrator {
         }
 
         return {
-          message: `도구 호출 중 오류가 발생했습니다: ${errorMessage}`,
+          message: `${t(context.locale ?? 'en', 'errors.toolCallError')}: ${errorMessage}`,
           toolCalled: intent.tool,
           toolSuccess: false,
           error: errorMessage,
@@ -337,7 +340,7 @@ export class Orchestrator {
       console.error('Orchestrator error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
-        message: `요청을 처리하는 중 오류가 발생했습니다: ${errorMessage}`,
+        message: `${t(context?.locale ?? 'en', 'errors.processingError')}: ${errorMessage}`,
         error: errorMessage,
       };
     }
@@ -353,20 +356,22 @@ export class Orchestrator {
   async processAction(
     sessionId: string,
     action: string,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    locale?: Locale
   ): Promise<OrchestratorResult> {
     // Check for direct action mapping (bypass LLM for known UI actions)
     const directMapping = DIRECT_ACTION_MAPPINGS[action];
     if (directMapping) {
       console.log(`[Orchestrator] Direct action mapping: ${action} → ${directMapping.tool}`);
-      return this.executeDirectAction(sessionId, directMapping, payload);
+      return this.executeDirectAction(sessionId, directMapping, payload, locale);
     }
 
-    // Fallback: LLM 경유 방식 for unknown actions
-    const actionDescription = ACTION_DESCRIPTIONS[action] || `사용자가 '${action}' 액션을 수행하려 합니다`;
-    const message = `${actionDescription}. 데이터: ${JSON.stringify(payload)}`;
+    // Fallback: LLM-based intent parsing for unknown actions
+    const loc = locale ?? this.conversationContext.get(sessionId)?.locale ?? 'en';
+    const actionDescription = getActionDescription(loc, action);
+    const message = `${actionDescription}. Data: ${JSON.stringify(payload)}`;
 
-    return this.processMessage(sessionId, message);
+    return this.processMessage(sessionId, message, locale);
   }
 
   /**
@@ -376,13 +381,15 @@ export class Orchestrator {
   private async executeDirectAction(
     sessionId: string,
     mapping: DirectActionMapping,
-    payload: Record<string, unknown>
+    payload: Record<string, unknown>,
+    locale?: Locale
   ): Promise<OrchestratorResult> {
     let context = this.conversationContext.get(sessionId);
     if (!context) {
-      context = { history: [] };
+      context = { history: [], locale };
       this.conversationContext.set(sessionId, context);
     }
+    if (locale) context.locale = locale;
 
     try {
       let toolParams = mapping.paramMapper(payload);
@@ -431,7 +438,7 @@ export class Orchestrator {
       console.error(`[Orchestrator] Direct action error:`, error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
-        message: `도구 호출 중 오류가 발생했습니다: ${errorMessage}`,
+        message: `${t(context?.locale ?? 'en', 'errors.toolCallError')}: ${errorMessage}`,
         toolCalled: mapping.tool,
         toolSuccess: false,
         error: errorMessage,
@@ -541,7 +548,8 @@ export class Orchestrator {
             const origin = dep?.AirportCode || j.OnPoint || '';
             const dest = arr?.AirportCode || j.OffPoint || '';
             const depDate = dep?.Date || '';
-            return `${i === 0 ? '가는편' : '오는편'}(${origin}→${dest}, ${depDate})`;
+            const label = i === 0 ? 'Outbound' : 'Return';
+            return `${label}(${origin}→${dest}, ${depDate})`;
           });
         }
       }
@@ -619,9 +627,9 @@ export class Orchestrator {
         summary: cleaned.summary,
         combinationNote: cleaned.combinationNote,
         roundTripCombinations: combos.slice(0, 5),
-        _combinationsNote: combos.length > 5 ? `처음 5개만 표시 (총 ${combos.length}개 조합)` : undefined,
+        _combinationsNote: combos.length > 5 ? `Showing first 5 of ${combos.length} combinations` : undefined,
         offers: offers.slice(0, 3),
-        _offersNote: offers.length > 3 ? `처음 3개만 표시 (총 ${offers.length}개)` : undefined,
+        _offersNote: offers.length > 3 ? `Showing first 3 of ${offers.length} offers` : undefined,
         sessionId: cleaned.sessionId,
         nextStep: cleaned.nextStep,
       };
@@ -637,7 +645,7 @@ export class Orchestrator {
       const offers = cleaned.offers as Array<Record<string, unknown>>;
       if (offers.length > 5) {
         cleaned.offers = offers.slice(0, 5);
-        cleaned._offersNote = `처음 5개만 표시 (총 ${offers.length}개)`;
+        cleaned._offersNote = `Showing first 5 of ${offers.length} offers`;
       }
     }
 

@@ -7,6 +7,7 @@ import { useChatStore } from '../../store/chatStore';
 import { WelcomeScreen } from './WelcomeScreen';
 import { ChatInput } from './ChatInput';
 import { ChatMessage, ChatMessageLoading } from './ChatMessage';
+import { tf } from '../../i18n';
 
 function getWsUrl(): string {
   if (import.meta.env.VITE_BRIDGE_WS_URL) {
@@ -81,10 +82,10 @@ export function ChatContainer() {
         disabled={!connected || isLoading}
         placeholder={
           !connected
-            ? '서버에 연결 중...'
+            ? tf('chat.connecting')
             : isLoading
-            ? '응답을 기다리는 중...'
-            : '메시지를 입력하세요...'
+            ? tf('chat.waiting')
+            : tf('chat.placeholder')
         }
       />
     </div>

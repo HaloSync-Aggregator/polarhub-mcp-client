@@ -6,6 +6,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ConversationMessage } from '@polarhub-demo/shared';
 import { generateTransactionId } from '@polarhub-demo/shared';
+import { tf } from '../i18n';
 
 export interface Conversation {
   id: string;
@@ -51,7 +52,7 @@ function generateTitle(messages: ConversationMessage[]): string {
     // Truncate to 30 chars
     return content.length > 30 ? content.substring(0, 30) + '...' : content;
   }
-  return '새 대화';
+  return tf('conversation.new');
 }
 
 export const useConversationStore = create<ConversationState>()(
@@ -65,7 +66,7 @@ export const useConversationStore = create<ConversationState>()(
         const id = generateConversationId();
         const newConversation: Conversation = {
           id,
-          title: '새 대화',
+          title: tf('conversation.new'),
           messages: [],
           transactionId: generateTransactionId(),
           createdAt: Date.now(),

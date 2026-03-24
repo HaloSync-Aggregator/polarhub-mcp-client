@@ -10,6 +10,7 @@ import type {
 } from '@polarhub-demo/shared';
 import { generateMessageId, generateTransactionId } from '@polarhub-demo/shared';
 import { useConversationStore } from './conversationStore';
+import { getLocale, tf } from '../i18n';
 
 // Extended assistant message payload with toolResult
 interface AssistantMessageWithToolResult {
@@ -64,7 +65,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
   ws: null,
 
   connect: (url: string) => {
-    const ws = new WebSocket(url);
+    const ws = new WebSocket(`${url}?locale=${getLocale()}`);
 
     ws.onopen = () => {
       console.log('WebSocket connected');
@@ -319,7 +320,7 @@ function handleServerMessage(
         messages.push({
           id: message.id,
           role: 'system',
-          content: `${message.toolName} 호출 중...`,
+          content: `${message.toolName} ${tf('chat.toolCalling')}`,
           timestamp: message.timestamp,
           toolCall: {
             name: message.toolName,
@@ -347,7 +348,7 @@ function handleServerMessage(
       const errorMsg: ConversationMessage = {
         id: message.id,
         role: 'system',
-        content: `오류: ${message.message}`,
+        content: `${tf('chat.error')}${message.message}`,
         timestamp: Date.now(),
       };
       set((state) => ({

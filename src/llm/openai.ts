@@ -13,6 +13,7 @@ import {
   buildGeneralResponsePrompt,
 } from './provider.js';
 import { config } from '../config/index.js';
+import { t } from '../i18n/strings.js';
 
 export class OpenAIProvider implements LLMProvider {
   private client: OpenAI;
@@ -31,7 +32,7 @@ export class OpenAIProvider implements LLMProvider {
     availableTools: MCPTool[]
   ): Promise<IntentResult> {
     // v3: Dynamic prompt generation from MCP tools
-    const systemPrompt = buildIntentParserPrompt(availableTools);
+    const systemPrompt = buildIntentParserPrompt(availableTools, context.locale);
 
     // v4: Debug logging for prompt inspection
     if (process.env.DEBUG_PROMPTS === 'true') {
@@ -103,7 +104,7 @@ export class OpenAIProvider implements LLMProvider {
     } catch (error) {
       console.error('OpenAI parseIntent error:', error);
       return {
-        response: '죄송합니다. 요청을 처리하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+        response: t(context.locale ?? 'en', 'errors.parseIntentFailed'),
         confidence: 0,
       };
     }
@@ -112,10 +113,10 @@ export class OpenAIProvider implements LLMProvider {
   async summarizeResult(
     toolName: string,
     result: unknown,
-    _context: ConversationContext
+    context: ConversationContext
   ): Promise<string> {
     // v3: Dynamic prompt generation with tool-specific guidelines
-    const systemPrompt = buildResultSummarizerPrompt(toolName, result);
+    const systemPrompt = buildResultSummarizerPrompt(toolName, result, context.locale);
 
     try {
       const response = await this.client.chat.completions.create({
@@ -124,17 +125,17 @@ export class OpenAIProvider implements LLMProvider {
           { role: 'system', content: systemPrompt },
           {
             role: 'user',
-            content: '위 결과를 사용자에게 친절하고 자세하게 요약해주세요. 가이드라인을 따라 핵심 정보를 모두 포함해주세요.'
+            content: t(context.locale ?? 'en', 'ui.summarizerInstruction')
           },
         ],
         temperature: 0.4,
         max_tokens: 4096, // Increased to handle detailed flight listings (12+ flights)
       });
 
-      return response.choices[0]?.message?.content ?? '결과를 요약할 수 없습니다.';
+      return response.choices[0]?.message?.content ?? t(context.locale ?? 'en', 'errors.summarizeFailed');
     } catch (error) {
       console.error('OpenAI summarizeResult error:', error);
-      return '결과를 요약하는 중 오류가 발생했습니다.';
+      return t(context.locale ?? 'en', 'errors.summarizeError');
     }
   }
 
@@ -161,10 +162,10 @@ export class OpenAIProvider implements LLMProvider {
         max_tokens: 500,
       });
 
-      return response.choices[0]?.message?.content ?? '응답을 생성할 수 없습니다.';
+      return response.choices[0]?.message?.content ?? t(context.locale ?? 'en', 'errors.generateFailed');
     } catch (error) {
       console.error('OpenAI generateResponse error:', error);
-      return '응답을 생성하는 중 오류가 발생했습니다.';
+      return t(context.locale ?? 'en', 'errors.generateError');
     }
   }
 }

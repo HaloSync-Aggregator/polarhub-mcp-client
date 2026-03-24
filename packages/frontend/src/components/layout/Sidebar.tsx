@@ -16,6 +16,7 @@ import {
   X,
 } from 'lucide-react';
 import { useChatStore, useConversationStore, type Conversation } from '../../store';
+import { tf } from '../../i18n';
 
 interface ConversationItemProps {
   conversation: Conversation;
@@ -50,8 +51,8 @@ function ConversationItem({
     const isYesterday =
       new Date(now.getTime() - 86400000).toDateString() === date.toDateString();
 
-    if (isToday) return '오늘';
-    if (isYesterday) return '어제';
+    if (isToday) return tf('sidebar.today');
+    if (isYesterday) return tf('sidebar.yesterday');
     return date.toLocaleDateString('ko-KR', { month: 'short', day: 'numeric' });
   };
 
@@ -129,7 +130,7 @@ function ConversationItem({
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-text-primary hover:bg-bg-hover"
               >
                 <Edit3 size={14} />
-                이름 변경
+                {tf('sidebar.rename')}
               </button>
               <button
                 onClick={() => {
@@ -139,7 +140,7 @@ function ConversationItem({
                 className="w-full flex items-center gap-2 px-3 py-2 text-sm text-status-error hover:bg-status-error-light"
               >
                 <Trash2 size={14} />
-                삭제
+                {tf('sidebar.delete')}
               </button>
             </div>
           )}
@@ -170,10 +171,10 @@ export function Sidebar() {
         date.getTime() > now.getTime() - 7 * 86400000 && !isToday && !isYesterday;
 
       let key: string;
-      if (isToday) key = '오늘';
-      else if (isYesterday) key = '어제';
-      else if (isThisWeek) key = '이번 주';
-      else key = '이전';
+      if (isToday) key = tf('sidebar.today');
+      else if (isYesterday) key = tf('sidebar.yesterday');
+      else if (isThisWeek) key = tf('sidebar.thisWeek');
+      else key = tf('sidebar.older');
 
       if (!groups[key]) groups[key] = [];
       groups[key].push(conv);
@@ -182,7 +183,7 @@ export function Sidebar() {
     {} as Record<string, Conversation[]>
   );
 
-  const groupOrder = ['오늘', '어제', '이번 주', '이전'];
+  const groupOrder = [tf('sidebar.today'), tf('sidebar.yesterday'), tf('sidebar.thisWeek'), tf('sidebar.older')];
 
   return (
     <>
@@ -199,7 +200,7 @@ export function Sidebar() {
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-halo-purple text-white rounded-full font-medium hover:bg-halo-purple-hover transition-all duration-200 shadow-sm hover:shadow-md"
           >
             <Plus size={18} />
-            새 대화
+            {tf('sidebar.newChat')}
           </button>
         </div>
 
@@ -233,8 +234,8 @@ export function Sidebar() {
           {conversations.length === 0 && (
             <div className="text-center py-8 text-text-muted">
               <MessageSquare size={40} className="mx-auto mb-3 opacity-30" />
-              <p className="text-sm">대화 내역이 없습니다</p>
-              <p className="text-xs mt-1">새 대화를 시작해보세요</p>
+              <p className="text-sm">{tf('sidebar.emptyTitle')}</p>
+              <p className="text-xs mt-1">{tf('sidebar.emptyDescription')}</p>
             </div>
           )}
         </div>

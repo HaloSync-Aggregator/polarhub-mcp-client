@@ -5,6 +5,7 @@
 import { Wifi, WifiOff, Menu } from 'lucide-react';
 import { useChatStore } from '../../store/chatStore';
 import { useConversationStore } from '../../store/conversationStore';
+import { tf } from '../../i18n';
 
 export function Header() {
   const { connected } = useChatStore();
@@ -18,7 +19,7 @@ export function Header() {
         <button
           onClick={toggleSidebar}
           className="p-2 hover:bg-bg-hover rounded-lg transition-colors lg:hidden"
-          aria-label={sidebarOpen ? '사이드바 닫기' : '사이드바 열기'}
+          aria-label={sidebarOpen ? tf('header.closeSidebar') : tf('header.openSidebar')}
         >
           <Menu size={20} className="text-text-secondary" />
         </button>
@@ -43,7 +44,7 @@ export function Header() {
         >
           <div className={`status-dot ${connected ? 'status-dot-online' : 'status-dot-offline'}`} />
           {connected ? <Wifi size={14} /> : <WifiOff size={14} />}
-          <span className="hidden sm:inline">{connected ? '연결됨' : '연결 끊김'}</span>
+          <span className="hidden sm:inline">{connected ? tf('header.connected') : tf('header.disconnected')}</span>
         </div>
       </div>
     </header>

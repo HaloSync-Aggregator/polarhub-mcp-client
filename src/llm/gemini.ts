@@ -13,6 +13,7 @@ import {
   buildGeneralResponsePrompt,
 } from './provider.js';
 import { config } from '../config/index.js';
+import { t } from '../i18n/strings.js';
 
 /**
  * Recursively strip JSON Schema keys unsupported by Gemini API.
@@ -59,7 +60,7 @@ export class GeminiProvider implements LLMProvider {
     availableTools: MCPTool[]
   ): Promise<IntentResult> {
     // v3: Dynamic prompt generation from MCP tools
-    const systemPrompt = buildIntentParserPrompt(availableTools);
+    const systemPrompt = buildIntentParserPrompt(availableTools, context.locale);
 
     // v4: Debug logging for prompt inspection
     if (process.env.DEBUG_PROMPTS === 'true') {
@@ -135,7 +136,7 @@ export class GeminiProvider implements LLMProvider {
     } catch (error) {
       console.error('Gemini parseIntent error:', error);
       return {
-        response: '죄송합니다. 요청을 처리하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+        response: t(context.locale ?? 'en', 'errors.parseIntentFailed'),
         confidence: 0,
       };
     }
@@ -144,16 +145,16 @@ export class GeminiProvider implements LLMProvider {
   async summarizeResult(
     toolName: string,
     result: unknown,
-    _context: ConversationContext
+    context: ConversationContext
   ): Promise<string> {
     // v3: Dynamic prompt generation with tool-specific guidelines
-    const systemPrompt = buildResultSummarizerPrompt(toolName, result);
+    const systemPrompt = buildResultSummarizerPrompt(toolName, result, context.locale);
 
     try {
       const genResult = await this.model.generateContent({
         contents: [{
           role: 'user',
-          parts: [{ text: `${systemPrompt}\n\n위 결과를 사용자에게 친절하고 자세하게 요약해주세요. 가이드라인을 따라 핵심 정보를 모두 포함해주세요.` }]
+          parts: [{ text: `${systemPrompt}\n\n${t(context.locale ?? 'en', 'ui.summarizerInstruction')}` }]
         }],
         generationConfig: {
           temperature: 0.4,
@@ -161,10 +162,10 @@ export class GeminiProvider implements LLMProvider {
         },
       });
 
-      return genResult.response.text() || '결과를 요약할 수 없습니다.';
+      return genResult.response.text() || t(context.locale ?? 'en', 'errors.summarizeFailed');
     } catch (error) {
       console.error('Gemini summarizeResult error:', error);
-      return '결과를 요약하는 중 오류가 발생했습니다.';
+      return t(context.locale ?? 'en', 'errors.summarizeError');
     }
   }
 
@@ -193,10 +194,10 @@ export class GeminiProvider implements LLMProvider {
       const prompt = `${systemPrompt}\n\nUser: ${userMessage}`;
       const result = await chat.sendMessage(prompt);
 
-      return result.response.text() || '응답을 생성할 수 없습니다.';
+      return result.response.text() || t(context.locale ?? 'en', 'errors.generateFailed');
     } catch (error) {
       console.error('Gemini generateResponse error:', error);
-      return '응답을 생성하는 중 오류가 발생했습니다.';
+      return t(context.locale ?? 'en', 'errors.generateError');
     }
   }
 }

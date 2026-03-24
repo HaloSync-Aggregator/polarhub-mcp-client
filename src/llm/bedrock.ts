@@ -13,6 +13,7 @@ import {
   buildGeneralResponsePrompt,
 } from './provider.js';
 import { config } from '../config/index.js';
+import { t } from '../i18n/strings.js';
 
 interface ConverseMessage {
   role: 'user' | 'assistant';
@@ -71,7 +72,7 @@ export class BedrockProvider implements LLMProvider {
     context: ConversationContext,
     availableTools: MCPTool[]
   ): Promise<IntentResult> {
-    const systemPrompt = buildIntentParserPrompt(availableTools);
+    const systemPrompt = buildIntentParserPrompt(availableTools, context.locale);
 
     if (process.env.DEBUG_PROMPTS === 'true') {
       console.log('\n=== INTENT PARSER PROMPT (Bedrock) ===');
@@ -128,7 +129,7 @@ export class BedrockProvider implements LLMProvider {
     } catch (error) {
       console.error('Bedrock parseIntent error:', error);
       return {
-        response: '죄송합니다. 요청을 처리하는 중 오류가 발생했습니다. 다시 시도해 주세요.',
+        response: t(context.locale ?? 'en', 'errors.parseIntentFailed'),
         confidence: 0,
       };
     }
@@ -137,9 +138,9 @@ export class BedrockProvider implements LLMProvider {
   async summarizeResult(
     toolName: string,
     result: unknown,
-    _context: ConversationContext
+    context: ConversationContext
   ): Promise<string> {
-    const systemPrompt = buildResultSummarizerPrompt(toolName, result);
+    const systemPrompt = buildResultSummarizerPrompt(toolName, result, context.locale);
 
     try {
       const response = await this.converse({
@@ -147,17 +148,17 @@ export class BedrockProvider implements LLMProvider {
         system: [{ text: systemPrompt }],
         messages: [{
           role: 'user',
-          content: [{ text: '위 결과를 사용자에게 친절하고 자세하게 요약해주세요. 가이드라인을 따라 핵심 정보를 모두 포함해주세요.' }],
+          content: [{ text: t(context.locale ?? 'en', 'ui.summarizerInstruction') }],
         }],
         inferenceConfig: { temperature: 0.4, maxTokens: 4096 },
       });
 
       const content = response.output?.message?.content ?? [];
       const textBlock = content.find((b: any) => b.text);
-      return textBlock?.text ?? '결과를 요약할 수 없습니다.';
+      return textBlock?.text ?? t(context.locale ?? 'en', 'errors.summarizeFailed');
     } catch (error) {
       console.error('Bedrock summarizeResult error:', error);
-      return '결과를 요약하는 중 오류가 발생했습니다.';
+      return t(context.locale ?? 'en', 'errors.summarizeError');
     }
   }
 
@@ -184,10 +185,10 @@ export class BedrockProvider implements LLMProvider {
 
       const content = response.output?.message?.content ?? [];
       const textBlock = content.find((b: any) => b.text);
-      return textBlock?.text ?? '응답을 생성할 수 없습니다.';
+      return textBlock?.text ?? t(context.locale ?? 'en', 'errors.generateFailed');
     } catch (error) {
       console.error('Bedrock generateResponse error:', error);
-      return '응답을 생성하는 중 오류가 발생했습니다.';
+      return t(context.locale ?? 'en', 'errors.generateError');
     }
   }
 }
