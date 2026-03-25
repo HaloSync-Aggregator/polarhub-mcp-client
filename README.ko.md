@@ -546,6 +546,34 @@ src/ (백엔드 TypeScript 컴파일)
 
 ---
 
+## 다국어 지원 (i18n)
+
+클라이언트는 **한국어**와 **영어**를 지원합니다. 브라우저 언어를 자동 감지하여 UI와 LLM 응답 언어가 전환됩니다.
+
+### 동작 방식
+
+1. 브라우저 언어(`navigator.language`)를 페이지 로드 시 감지
+2. WebSocket을 통해 서버에 locale 전달
+3. 시스템 프롬프트와 LLM 응답이 감지된 언어에 맞게 적용
+
+### 영어로 전환하기
+
+**방법 A — 브라우저 언어**: Chrome → 설정 → 언어 → English를 최상위로 이동
+
+**방법 B — URL 파라미터**: URL에 `?locale=en` 추가:
+```
+http://localhost:3000/?locale=en
+```
+
+**방법 C — 환경 변수**: `.env`에서 서버 기본값 설정:
+```
+DEFAULT_LOCALE=en
+```
+
+> 우선순위: URL 파라미터 > 브라우저 언어 > `DEFAULT_LOCALE` 환경 변수
+
+---
+
 ## 디버깅
 
 ### LLM 프롬프트 확인

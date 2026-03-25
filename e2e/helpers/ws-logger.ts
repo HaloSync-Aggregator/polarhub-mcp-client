@@ -76,4 +76,41 @@ export class WsLogger {
   clear(): void {
     this.frames = [];
   }
+
+  /** Extract available seats from the last seat_availability toolResult */
+  getAvailableSeats(): string[] {
+    const seats: string[] = [];
+    // Search frames in reverse for seat_availability result
+    for (let i = this.frames.length - 1; i >= 0; i--) {
+      const f = this.frames[i];
+      if (f.direction !== 'received') continue;
+      const data = f.data as Record<string, unknown>;
+      if (data?.type !== 'assistant_message') continue;
+      const tr = data.toolResult as Record<string, unknown> | undefined;
+      if (!tr?.data) continue;
+      const inner = tr.data as Record<string, unknown>;
+      const seatMaps = inner.SeatMap as Array<Record<string, unknown>> | undefined;
+      if (!seatMaps?.length) continue;
+
+      for (const sm of seatMaps) {
+        const cabins = sm.Cabins as Array<Record<string, unknown>> | undefined;
+        if (!cabins) continue;
+        for (const cabin of cabins) {
+          const rows = cabin.RowInfo as Array<Record<string, unknown>> | undefined;
+          if (!rows) continue;
+          for (const row of rows) {
+            const rowSeats = row.Seats as Array<Record<string, unknown>> | undefined;
+            if (!rowSeats) continue;
+            for (const seat of rowSeats) {
+              if (seat.SeatStatus === 'A') {
+                seats.push(`${row.Number}${seat.Column}`);
+              }
+            }
+          }
+        }
+      }
+      if (seats.length > 0) break;
+    }
+    return seats;
+  }
 }

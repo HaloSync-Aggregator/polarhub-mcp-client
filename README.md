@@ -458,6 +458,34 @@ frontend → src/ (backend TypeScript compilation)
 
 ---
 
+## Language Support (i18n)
+
+The client supports **English** and **Korean**. The language is auto-detected from the browser and applied to both the UI and LLM responses.
+
+### How It Works
+
+1. Browser language (`navigator.language`) is detected on page load
+2. The locale is passed to the server via WebSocket
+3. System prompts and LLM responses adapt to the detected language
+
+### Switching to English
+
+**Option A — Browser language**: Change your browser language to English in Chrome → Settings → Languages → move English to the top.
+
+**Option B — URL parameter**: Append `?locale=en` to the URL:
+```
+http://localhost:3000/?locale=en
+```
+
+**Option C — Environment variable**: Set the server default in `.env`:
+```
+DEFAULT_LOCALE=en
+```
+
+> The priority is: URL parameter > Browser language > `DEFAULT_LOCALE` env var.
+
+---
+
 ## Debugging
 
 ### Check LLM Prompts

@@ -6,5 +6,6 @@ dist/
 .vite/
 .claude/
 test-results/
+demos/i18n/
 logs/
 .DS_Store

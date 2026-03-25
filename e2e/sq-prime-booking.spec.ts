@@ -20,7 +20,7 @@ for (const locale of ['en', 'ko'] as const) {
     // Create context with browser locale
     const context = await browser.newContext({
       locale: locale === 'ko' ? 'ko-KR' : 'en-US',
-      viewport: { width: 1280, height: 720 },
+      viewport: { width: 1920, height: 1080 },
       recordVideo: { dir: 'test-results/' },
     });
     const page = await context.newPage();

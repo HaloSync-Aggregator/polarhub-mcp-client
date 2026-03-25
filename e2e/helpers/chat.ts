@@ -100,6 +100,20 @@ export class ChatPage {
     });
   }
 
+  /** Get the last assistant message's toolResult (raw JSON from MCP) */
+  async getLastToolResult(): Promise<Record<string, unknown> | null> {
+    // Evaluate in browser context to access Zustand store
+    return this.page.evaluate(() => {
+      const store = (window as any).__ZUSTAND_CHAT_STORE__;
+      if (!store) return null;
+      const messages = store.getState().messages;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if (messages[i].toolResult) return messages[i].toolResult;
+      }
+      return null;
+    });
+  }
+
   /** Check if the page is connected (WebSocket) */
   async waitForConnection(): Promise<void> {
     // Wait for the connection indicator to show connected state (bg-halo-green-light)

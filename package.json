@@ -11,10 +11,7 @@
     "dev": "NODE_ENV=development tsx watch --ignore './packages/frontend/**' src/index.ts",
     "build": "npm run build -w @polarhub-demo/frontend && tsc",
     "start": "NODE_ENV=production node dist/index.js",
-    "clean": "rm -rf dist packages/*/dist packages/*/node_modules node_modules",
-    "test:e2e": "npx playwright test",
-    "test:sq": "npx playwright test e2e/sq-prime-booking.spec.ts",
-    "test:ek": "npx playwright test e2e/ek-seat-change.spec.ts"
+    "clean": "rm -rf dist packages/*/dist packages/*/node_modules node_modules"
   },
   "dependencies": {
     "@google/generative-ai": "^0.21.0",

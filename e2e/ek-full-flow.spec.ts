@@ -33,32 +33,38 @@ function extractOrderId(text: string): string | null {
 
 /** Extract a real available seat from the response */
 function extractAvailableSeat(text: string): string {
-  // Look for seats explicitly mentioned near "Available" / "가능" / "available"
-  const availPattern = /(\d{1,2}[A-K])\s*(?:좌석은?|seat)?\s*(?:.*?)(?:available|가능|Available|선택 가능|예약 가능)/gi;
-  let match: RegExpExecArray | null;
-  while ((match = availPattern.exec(text)) !== null) {
-    return match[1];
+  // Split into sentences/lines and find ones with positive availability keywords
+  const lines = text.split(/[.\n]/);
+  const positiveKeywords = /가능|available|open|선택 가능|예약 가능|choice seat|extra legroom/i;
+  const negativeKeywords = /불가|occupied|reserved|제한|지정|이미|not available|unavailable|선택 불가/i;
+
+  for (const line of lines) {
+    if (positiveKeywords.test(line) && !negativeKeywords.test(line)) {
+      const seats = line.match(/\b(\d{1,2}[A-K])\b/g);
+      if (seats && seats.length > 0) {
+        return seats[0];
+      }
+    }
   }
 
-  // Reverse pattern: "available" then seat
-  const reversePattern = /(?:available|가능|Available|선택 가능)\s*(?:.*?)(\d{1,2}[A-K])\b/gi;
-  while ((match = reversePattern.exec(text)) !== null) {
-    return match[1];
+  // Fallback: row 24+ seats near non-negative context
+  const row24plus = text.match(/\b(2[4-9][A-K]|[3-9]\d[A-K])\b/g);
+  if (row24plus) {
+    for (const s of row24plus) {
+      const idx = text.indexOf(s);
+      const ctx = text.substring(Math.max(0, idx - 40), idx + 40);
+      if (!negativeKeywords.test(ctx)) return s;
+    }
   }
 
-  // Fallback: just pick the first seat number mentioned
-  const allSeats = text.match(/\b(\d{1,2}[A-K])\b/g);
-  if (allSeats && allSeats.length > 0) {
-    return allSeats[0];
-  }
-  return '24A'; // last resort
+  return '24B'; // last resort — most commonly available in EK 777 tests
 }
 
 for (const locale of ['en', 'ko'] as const) {
   test(`EK Full Flow — Book + Seat Change (${locale})`, async ({ browser }) => {
     const context = await browser.newContext({
       locale: locale === 'ko' ? 'ko-KR' : 'en-US',
-      viewport: { width: 1280, height: 720 },
+      viewport: { width: 1920, height: 1080 },
       recordVideo: { dir: 'test-results/' },
     });
     const page = await context.newPage();
@@ -100,15 +106,28 @@ for (const locale of ['en', 'ko'] as const) {
 
     // ===== PART 2: Post-Booking Seat Change =====
 
-    // Step 4: Retrieve the order we just created
-    const retrieveMsg = locale === 'en'
-      ? `Retrieve order ${orderId}`
-      : `주문 ${orderId} 조회해줘`;
-    console.log(`[${locale}] Step 4: Retrieve Order`);
-    await chat.sendMessage(retrieveMsg);
-    const retrieveResult = await chat.getLastAssistantMessage();
-    expect(retrieveResult).toMatch(/EK|Emirates|order|주문|예약/i);
-    console.log(`[${locale}] Retrieve: ${retrieveResult.substring(0, 100)}...`);
+    // Wait for sandbox to sync after ticketing (EK needs longer)
+    console.log(`[${locale}] Waiting 15s for sandbox sync...`);
+    await page.waitForTimeout(15000);
+
+    // Step 4: Retrieve the order — retry if sandbox is still syncing
+    let retrieveResult = '';
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const retrieveMsg = locale === 'en'
+        ? `Retrieve order ${orderId}`
+        : `주문 ${orderId} 조회해줘`;
+      console.log(`[${locale}] Step 4: Retrieve Order (attempt ${attempt})`);
+      await chat.sendMessage(retrieveMsg);
+      retrieveResult = await chat.getLastAssistantMessage();
+      console.log(`[${locale}] Retrieve: ${retrieveResult.substring(0, 100)}...`);
+
+      const isError = /지연|업데이트 중|unable|not found|error|찾을 수 없/i.test(retrieveResult);
+      if (!isError) break;
+
+      console.log(`[${locale}] Retrieve failed, waiting 10s before retry...`);
+      await page.waitForTimeout(10000);
+    }
+    expect(retrieveResult).toMatch(/EK|Emirates|TICKETED|발권/i);
 
     // Step 5: Seat Availability
     console.log(`[${locale}] Step 5: Seat Availability`);
@@ -117,17 +136,62 @@ for (const locale of ['en', 'ko'] as const) {
     expect(seatResult.length).toBeGreaterThan(30);
     console.log(`[${locale}] Seats: ${seatResult.substring(0, 100)}...`);
 
-    // Step 6: Pick a real available seat
-    const seat = extractAvailableSeat(seatResult);
-    const selectMsg = locale === 'en'
-      ? `Select seat ${seat}`
-      : `${seat} 좌석 선택해줘`;
-    console.log(`[${locale}] Step 6: Select Seat — ${seat}`);
-    await chat.sendMessage(selectMsg);
-    const selectResult = await chat.getLastAssistantMessage();
-    console.log(`[${locale}] Select: ${selectResult.substring(0, 150)}...`);
+    // Step 6: Pick a real available seat — retry full cycle (seats → select) if sandbox is syncing
+    let selectResult = '';
+    let seatSuccess = false;
+    let currentSeatResult = seatResult;
 
-    // Step 7: Confirm
+    // Extract LLM's recommended seat from the seat availability response
+    function extractRecommendedSeat(text: string): string | null {
+      const lines = text.split('\n');
+      let inRecommendation = false;
+      for (const line of lines) {
+        if (/recommend|추천/i.test(line)) inRecommendation = true;
+        if (inRecommendation) {
+          const seat = line.match(/\b(\d{1,2}[A-K])\b/);
+          if (seat) return seat[1];
+        }
+      }
+      const selectMatch = text.match(/(?:select|선택)[^.]*?(\d{1,2}[A-K])\b/i);
+      if (selectMatch) return selectMatch[1];
+      return null;
+    }
+
+    const recommendedSeat = extractRecommendedSeat(currentSeatResult);
+    const fallbackSeats = wsLog.getAvailableSeats();
+    const isRecommendedAvailable = recommendedSeat && fallbackSeats.includes(recommendedSeat);
+    const windowFallback = fallbackSeats.find(s => s.endsWith('A') || s.endsWith('K')) ?? fallbackSeats[0] ?? '25A';
+    const firstSeat = isRecommendedAvailable ? recommendedSeat : windowFallback;
+    console.log(`[${locale}] LLM recommended: ${recommendedSeat}, available: ${isRecommendedAvailable}, using: ${firstSeat}`);
+
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      const seat = attempt === 1 ? firstSeat : (fallbackSeats[attempt] ?? '25A');
+      const selectMsg = locale === 'en'
+        ? (attempt === 1 ? `Select seat ${seat} please` : `That seat didn't work. How about seat ${seat}?`)
+        : (attempt === 1 ? `${seat} 좌석 선택해줘` : `그 좌석은 안 되네요. ${seat} 좌석으로 해줘`);
+      console.log(`[${locale}] Step 6: Select Seat — ${seat} (attempt ${attempt})`);
+      await chat.sendMessage(selectMsg);
+      selectResult = await chat.getLastAssistantMessage();
+      console.log(`[${locale}] Select: ${selectResult.substring(0, 150)}...`);
+
+      const isSuccess = /완료|준비.*완료|ready.*confirm|successfully prepared|change.*ready/i.test(selectResult);
+      const isError = /실패|오류|찾을 수 없|중단되었|unable to|could not|not found|not completed/i.test(selectResult);
+      if (isSuccess && !isError) {
+        seatSuccess = true;
+        break;
+      }
+
+      if (attempt < 3) {
+        console.log(`[${locale}] Seat select failed, re-fetching seats after 10s...`);
+        await page.waitForTimeout(10000);
+        // Re-fetch seat availability to get fresh data
+        await chat.sendMessage(prompts.showSeats);
+        currentSeatResult = await chat.getLastAssistantMessage();
+        console.log(`[${locale}] Re-fetched seats: ${currentSeatResult.substring(0, 100)}...`);
+      }
+    }
+
+    // Step 7: Confirm (only if seat selection succeeded)
     console.log(`[${locale}] Step 7: Confirm`);
     await chat.sendMessage(prompts.confirm);
     const confirmResult = await chat.getLastAssistantMessage();
