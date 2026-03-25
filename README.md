@@ -539,8 +539,6 @@ Retrieving an existing booking, viewing the seat map, changing the seat, and re-
 https://github.com/user-attachments/assets/2b0d7d4e-305a-475d-bddd-8467fd5d09d7
 
 
-> Videos are edited at 3x speed from actual demos.
-
 ---
 
 ## Usage Examples
