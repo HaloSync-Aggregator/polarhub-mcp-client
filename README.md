@@ -484,6 +484,8 @@ DEFAULT_LOCALE=en
 
 > The priority is: URL parameter > Browser language > `DEFAULT_LOCALE` env var.
 
+**Note:** The response language is determined by the locale setting, not the input language. If you type in Korean with `locale=en`, the AI will still respond in English (and vice versa).
+
 ---
 
 ## Debugging
