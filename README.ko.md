@@ -624,7 +624,8 @@ https://github.com/user-attachments/assets/ca0e2d2a-7ffa-4d4c-a21b-431850e9a26e
 
 기존 예약을 조회하고, 좌석 배치도를 확인한 뒤, 좌석을 변경하고 재확인하는 흐름입니다.
 
-https://github.com/user-attachments/assets/162f67d3-eb58-4f23-8c44-4d3c34d61648
+https://github.com/user-attachments/assets/c872bdac-f156-40e7-80a3-46238dd0c85b
+
 
 
 ---
