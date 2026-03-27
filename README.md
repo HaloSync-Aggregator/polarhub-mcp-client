@@ -537,7 +537,8 @@ https://github.com/user-attachments/assets/ccadbd98-76dc-4066-ab69-0810439ad164
 
 Retrieving an existing booking, viewing the seat map, changing the seat, and re-verifying the order.
 
-https://github.com/user-attachments/assets/2b0d7d4e-305a-475d-bddd-8467fd5d09d7
+
+https://github.com/user-attachments/assets/b5a05689-e76f-46ee-a670-390b8e7909dd
 
 
 ---
