@@ -529,7 +529,8 @@ curl http://localhost:3000/health
 
 The full flow of searching flights with natural language, selecting an offer, entering passenger details, and completing the booking.
 
-https://github.com/user-attachments/assets/3395f378-88f2-4ff7-a340-2dc439a67570
+https://github.com/user-attachments/assets/ccadbd98-76dc-4066-ab69-0810439ad164
+
 
 
 ### Post-Booking — Order Retrieve → Seat Change (EK)
