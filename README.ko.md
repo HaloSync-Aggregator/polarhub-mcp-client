@@ -617,14 +617,14 @@ curl http://localhost:3000/health
 
 자연어로 항공편을 검색하고, 오퍼를 선택하고, 승객 정보를 입력하여 예약을 완료하는 전체 흐름입니다.
 
-https://github.com/user-attachments/assets/ca0e2d2a-7ffa-4d4c-a21b-431850e9a26e
+https://github.com/user-attachments/assets/02e9e245-eeb1-4586-ad7c-779ce1c0bc91
+
+
 
 
 ### Post-Booking — 예약 조회 → 좌석 변경 (EK)
 
 기존 예약을 조회하고, 좌석 배치도를 확인한 뒤, 좌석을 변경하고 재확인하는 흐름입니다.
-
-https://github.com/user-attachments/assets/c872bdac-f156-40e7-80a3-46238dd0c85b
 
 
 
