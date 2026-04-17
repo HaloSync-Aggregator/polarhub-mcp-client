@@ -110,7 +110,7 @@ This README is written for **external OTA developers who want to run PolarHub MC
 
 ## How It Works
 
-When a user sends a message, the server runs an **agent loop**: Gemini decides which tools to call, the MCP client executes them, and the results feed back into the same conversation until Gemini produces a final text response. A single user message can trigger a chain of tool calls (e.g. `flight_search → flight_price → flight_book`) without any extra round-trips to the user.
+When a user sends a message, the server runs an **agent loop**: the LLM decides which tools to call, the MCP client executes them, and the results feed back into the same conversation until the LLM produces a final text response. A single user message can trigger a chain of tool calls (e.g. `flight_search → flight_price → flight_book`) without any extra round-trips to the user. **Gemini and AWS Bedrock** are both supported via a provider-agnostic adapter pattern (`AgentLoopAdapter`); OpenAI agent-loop support is a follow-up.
 
 ### Step 1: Dynamic Tool Discovery
 
@@ -118,7 +118,12 @@ At startup the MCP client fetches the tool catalog from the MCP server and conve
 
 ### Step 2: Agent Loop
 
-Each user message drives the `AgentLoopRunner` (`src/orchestrator/agentLoop.ts`):
+Each user message drives the `AgentLoopRunner` (`src/orchestrator/agentLoop.ts`). The runner is provider-agnostic — it talks to an `AgentLoopAdapter` (`src/llm/agentLoopAdapter.ts`) that each LLM provider implements:
+
+- **GeminiChatStepAdapter** wraps Gemini's `generateContent` + function calling, preserving `thoughtSignature` fields required by thinking models.
+- **BedrockChatStepAdapter** wraps AWS Bedrock Converse API, handling `toolUse`/`toolResult` pairing via `toolUseId`.
+
+Both share the same loop behavior:
 
 ```
 loop (max 5 iterations):
@@ -144,12 +149,16 @@ MCP Client → POST /mcp
 
 ### Step 3: Session Short-Term Memory
 
-`SessionMemory` (`src/orchestrator/sessionMemory.ts`) keeps state for each WebSocket session:
+Each provider has its own memory implementation behind a common `ProviderMemory` interface:
 
-- **Bounded Gemini `Content[]`** — the most recent ~40 turns; pruning never splits a `functionCall` / `functionResponse` pair.
-- **Key facts extraction** — every tool result is scanned for `sessionId`, `orderId`, `transactionId`, `offerId`, `refundQuoteId`, etc. These are re-injected into Gemini's `systemInstruction` on the next step so the model uses real IDs instead of hallucinating.
+- **`GeminiSessionMemory`** (`src/orchestrator/sessionMemory.ts`) — bounded `Content[]`; pruning preserves `functionCall` / `functionResponse` pairs; raw candidate `Content` is kept verbatim to retain `thoughtSignature`.
+- **`BedrockSessionMemory`** (`src/orchestrator/bedrockSessionMemory.ts`) — bounded `ConverseMessage[]`; tracks `pendingToolUseId` to pair `toolUse` with `toolResult`; pruning preserves strict user/assistant alternation and tool pairs required by Bedrock.
+
+Shared across providers (`src/orchestrator/keyFacts.ts`):
+
+- **Key facts extraction** — every tool result is scanned for `sessionId`, `orderId`, `transactionId`, `offerId`, `refundQuoteId`, etc. These are re-injected into the LLM's system prompt on the next step so the model uses real IDs instead of hallucinating.
+- **Agent loop preamble** — a shared system-prompt preamble instructs the model to chain tools until the request is fully satisfied.
 - **Idle eviction** — sessions inactive for 30 minutes are cleared on a 5-minute sweep.
-- **thoughtSignature preservation** — raw candidate `Content` is stored as-is so signatures required by Gemini thinking models survive multi-turn replay.
 
 ---
 
@@ -164,8 +173,11 @@ MCP Client → POST /mcp
 | Module | File | Role |
 |--------|------|------|
 | **Orchestrator** | `src/orchestrator/index.ts` | Per-session state, idle eviction, dispatches each user message to an AgentLoopRunner |
-| **AgentLoopRunner** | `src/orchestrator/agentLoop.ts` | Gemini + MCP tool loop; cancellable, max-iteration guarded, per-tool timeout |
-| **SessionMemory** | `src/orchestrator/sessionMemory.ts` | Bounded Gemini `Content[]`, key-facts extraction, `thoughtSignature` preservation |
+| **AgentLoopRunner** | `src/orchestrator/agentLoop.ts` | Provider-agnostic MCP tool loop; cancellable, max-iteration guarded, per-tool timeout |
+| **AgentLoopAdapter** | `src/llm/agentLoopAdapter.ts` | Contract each LLM provider implements so the loop doesn't need to know provider details |
+| **GeminiChatStepAdapter** | `src/llm/geminiAdapter.ts` | Gemini implementation — Content[] history, thoughtSignature preservation |
+| **BedrockChatStepAdapter** | `src/llm/bedrockAdapter.ts` | Bedrock Converse implementation — ConverseMessage[] history, toolUseId pairing |
+| **Session memories** | `src/orchestrator/sessionMemory.ts`, `bedrockSessionMemory.ts` | Bounded per-provider history + key-facts extraction |
 | **MCP Client** | `src/mcp/client.ts` | MCP server connection, tool calls (with timeout option), static header auth, reconnection |
 | **LLM Provider** | `src/llm/provider.ts` | Unified interface for 3 LLM providers + dynamic prompt builder |
 | **WebSocket** | `src/server/websocket.ts` | Client session management, real-time tool-event emission, metadata propagation |
@@ -206,9 +218,11 @@ Preview (order_prepare) → "Proceed with this change?" [Confirm/Cancel]
 Execute (order_confirm) → "Change complete!"
 ```
 
-### Agent Loop — Multi-Tool Chaining Per Message
+### Agent Loop — Multi-Tool Chaining Per Message (provider-agnostic)
 
-`AgentLoopRunner` lets a single user message trigger a chain of tool calls:
+`AgentLoopRunner` is provider-neutral — it works with any `AgentLoopAdapter`. Currently **Gemini** and **AWS Bedrock (Converse API)** ship with adapters. OpenAI still runs the legacy `processAction` path and will gain an adapter in a follow-up PR.
+
+A single user message can trigger a chain of tool calls:
 
 ```
 "Book the cheapest Incheon → Singapore flight on 5/15 for 1 adult"
@@ -379,8 +393,8 @@ curl http://localhost:3000/health
 | `GEMINI_API_KEY` | Gemini | API key |
 | `GEMINI_MODEL` | Gemini | Model name (`gemini-2.0-flash`, `gemini-3-flash-preview`, etc.) |
 | `BEDROCK_API_KEY` | Bedrock | Bearer token for the Bedrock Converse API |
-| `AWS_REGION` | Bedrock | AWS region |
-| `BEDROCK_MODEL` | Bedrock | Model ID |
+| `AWS_REGION` | Bedrock | AWS region. **Must match the inference profile's region family** — e.g. `apac.*` profiles need an Asia Pacific region (`ap-northeast-2`, `ap-northeast-1`, `ap-southeast-1`, …); `us.*` profiles need a US region. Default: `us-east-1`. |
+| `BEDROCK_MODEL` | Bedrock | Inference profile ID (recommended) or model ID. Most newer Claude models on Bedrock require an inference profile — e.g. `apac.anthropic.claude-sonnet-4-20250514-v1:0` or `us.anthropic.claude-sonnet-4-5-20250929-v1:0`. Using a bare model ID typically produces `model identifier is invalid` or `on-demand throughput isn't supported`. |
 
 > Note: `.env.example` uses `GEMINI_MODEL=gemini-2.0-flash` as the sample value, while the runtime fallback in code is `gemini-3-flash-preview` if the variable is omitted entirely.
 
@@ -445,10 +459,20 @@ polarhub-mcp-client/
 │   │   └── bedrock.ts            # AWS Bedrock (Bearer Token, direct HTTP calls)
 │   ├── mcp/
 │   │   └── client.ts             # MCP client — Streamable HTTP + static header auth + reconnection + timeoutMs option
+│   ├── llm/
+│   │   ├── provider.ts           # LLMProvider interface + dynamic prompt builder
+│   │   ├── agentLoopAdapter.ts   # Provider-agnostic adapter contract for the agent loop
+│   │   ├── gemini.ts             # Gemini provider (schema sanitization + chatStep + adapter factory)
+│   │   ├── geminiAdapter.ts      # GeminiChatStepAdapter
+│   │   ├── bedrock.ts            # Bedrock provider (Converse API + chatStep + adapter factory)
+│   │   ├── bedrockAdapter.ts     # BedrockChatStepAdapter
+│   │   └── openai.ts             # OpenAI (legacy single-turn only for now)
 │   ├── orchestrator/
 │   │   ├── index.ts              # Per-session state, idle eviction, dispatch to AgentLoopRunner
-│   │   ├── agentLoop.ts          # Gemini + MCP tool loop (cancellable, max iterations, tool timeout)
-│   │   └── sessionMemory.ts      # Bounded Content[] history + key facts + thoughtSignature preservation
+│   │   ├── agentLoop.ts          # Provider-agnostic agent loop (cancellable, max iterations, tool timeout)
+│   │   ├── keyFacts.ts           # Shared key-facts extraction + agent-loop system preamble
+│   │   ├── sessionMemory.ts      # GeminiSessionMemory — bounded Content[] + thoughtSignature preservation
+│   │   └── bedrockSessionMemory.ts  # BedrockSessionMemory — ConverseMessage[] + toolUseId pairing
 │   ├── server/
 │   │   ├── http-server.ts        # Express (static files) + Vite (HMR, dev mode)
 │   │   └── websocket.ts          # WebSocket session management + metadata propagation
@@ -565,6 +589,9 @@ curl http://localhost:3000/health
 | `LLM API key missing` | Environment variable not set | Set the API key matching your `LLM_PROVIDER` in `.env` |
 | `Authentication failed` | Invalid credentials | Verify `POLARHUB_TENANT_ID` and `POLARHUB_API_SECRET` |
 | WebSocket disconnection | Server restart or network issue | Refresh browser (auto-reconnect attempted) |
+| Bedrock `The provided model identifier is invalid` | `AWS_REGION` does not match the inference profile's region family | For `apac.*` profiles set `AWS_REGION=ap-northeast-2` (or another AP region); for `us.*` profiles set a US region |
+| Bedrock `on-demand throughput isn't supported` | Using a bare model ID instead of an inference profile | Switch `BEDROCK_MODEL` to an inference-profile ID like `apac.anthropic.claude-sonnet-4-20250514-v1:0` |
+| `Agent loop not supported for LLM provider` | `LLM_PROVIDER=openai` with the agent loop | Use `gemini` or `bedrock` — OpenAI adapter is a follow-up |
 
 ---
 

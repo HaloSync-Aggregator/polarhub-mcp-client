@@ -11,6 +11,7 @@
 
 import type { MCPTool } from '../mcp/client.js';
 import type { Locale } from '../i18n/types.js';
+import type { AgentLoopAdapter } from './agentLoopAdapter.js';
 import {
   getWorkflowRules, getParameterMapping, getResponseFormat,
   getToolGuidelines, getSummarizerIntro, getSummarizerCommonRules,
@@ -64,6 +65,12 @@ export interface LLMProvider {
     userMessage: string,
     context: ConversationContext
   ): Promise<string>;
+
+  /**
+   * Optional — providers that support multi-turn agent loops return an adapter.
+   * Gemini and Bedrock implement this; OpenAI does not yet.
+   */
+  createAgentLoopAdapter?(): AgentLoopAdapter;
 }
 
 /**

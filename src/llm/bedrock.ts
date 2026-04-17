@@ -14,17 +14,28 @@ import {
 } from './provider.js';
 import { config } from '../config/index.js';
 import { t } from '../i18n/strings.js';
+import type { AgentLoopAdapter } from './agentLoopAdapter.js';
+import { BedrockChatStepAdapter } from './bedrockAdapter.js';
 
-interface ConverseMessage {
+export type ConverseContentBlock =
+  | { text: string }
+  | { toolUse: { toolUseId: string; name: string; input: unknown } }
+  | { toolResult: { toolUseId: string; content: Array<{ text: string }>; status?: 'success' | 'error' } };
+
+export interface ConverseMessage {
   role: 'user' | 'assistant';
-  content: Array<{ text: string } | { toolUse: { toolUseId: string; name: string; input: unknown } } | { toolResult: { toolUseId: string; content: Array<{ text: string }> } }>;
+  content: ConverseContentBlock[];
+}
+
+export interface ConverseToolSpec {
+  toolSpec: { name: string; description: string; inputSchema: { json: unknown } };
 }
 
 interface ConverseRequest {
   modelId: string;
   system?: Array<{ text: string }>;
   messages: ConverseMessage[];
-  toolConfig?: { tools: Array<{ toolSpec: { name: string; description: string; inputSchema: { json: unknown } } }> };
+  toolConfig?: { tools: ConverseToolSpec[] };
   inferenceConfig?: { temperature?: number; maxTokens?: number };
 }
 
@@ -190,5 +201,74 @@ export class BedrockProvider implements LLMProvider {
       console.error('Bedrock generateResponse error:', error);
       return t(context.locale ?? 'en', 'errors.generateError');
     }
+  }
+
+  /**
+   * Low-level single-turn Converse call for the agent loop.
+   * Caller owns the messages[] and system prompt. Returns the raw content blocks
+   * plus extracted functionCall (if any) or text.
+   */
+  async chatStep(params: {
+    messages: ConverseMessage[];
+    system?: Array<{ text: string }>;
+    tools: MCPTool[];
+    temperature?: number;
+    maxTokens?: number;
+  }): Promise<{
+    functionCall?: { name: string; args: Record<string, unknown> };
+    text?: string;
+    raw: ConverseContentBlock[];
+    stopReason?: string;
+  }> {
+    const toolSpecs: ConverseToolSpec[] = params.tools.map(t => ({
+      toolSpec: {
+        name: t.name,
+        description: t.description,
+        inputSchema: { json: t.inputSchema },
+      },
+    }));
+
+    const response = await this.converse({
+      modelId: this.model,
+      system: params.system,
+      messages: params.messages,
+      toolConfig: toolSpecs.length > 0 ? { tools: toolSpecs } : undefined,
+      inferenceConfig: {
+        temperature: params.temperature ?? 0.3,
+        maxTokens: params.maxTokens ?? 4096,
+      },
+    });
+
+    const raw = (response.output?.message?.content ?? []) as ConverseContentBlock[];
+    const stopReason = response.stopReason as string | undefined;
+
+    const toolBlock = raw.find(
+      (b): b is { toolUse: { toolUseId: string; name: string; input: unknown } } =>
+        typeof b === 'object' && b !== null && 'toolUse' in b,
+    );
+    if (toolBlock) {
+      return {
+        functionCall: {
+          name: toolBlock.toolUse.name,
+          args: toolBlock.toolUse.input as Record<string, unknown>,
+        },
+        raw,
+        stopReason,
+      };
+    }
+
+    const textBlock = raw.find(
+      (b): b is { text: string } =>
+        typeof b === 'object' && b !== null && 'text' in b,
+    );
+    return {
+      text: textBlock?.text,
+      raw,
+      stopReason,
+    };
+  }
+
+  createAgentLoopAdapter(): AgentLoopAdapter {
+    return new BedrockChatStepAdapter(this);
   }
 }

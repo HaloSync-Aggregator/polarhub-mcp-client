@@ -1,15 +1,13 @@
 /**
- * AgentLoopRunner
+ * AgentLoopRunner — provider-agnostic Gemini/Bedrock/etc. + MCP tool loop.
  *
- * Gemini + MCP tool loop: calls Gemini, detects function calls,
- * executes MCP tools, feeds results back via SessionMemory, and repeats
- * until Gemini returns a plain text response or a stop condition is hit.
+ * All provider-specific details (message format, thoughtSignature, toolUseId pairing)
+ * live in the AgentLoopAdapter implementation, not here.
  */
 
 import type { MCPTool, MCPToolResult, MCPClientManager } from '../mcp/client.js';
-import type { GeminiProvider } from '../llm/gemini.js';
 import { generateMessageId } from '../shared/index.js';
-import type { SessionMemory } from './sessionMemory.js';
+import type { AgentLoopAdapter, ProviderMemory } from '../llm/agentLoopAdapter.js';
 
 export class AgentCancelled extends Error {
   constructor() {
@@ -19,7 +17,7 @@ export class AgentCancelled extends Error {
 }
 
 interface AgentLoopDeps {
-  gemini: GeminiProvider;
+  adapter: AgentLoopAdapter;
   mcp: MCPClientManager;
   /** Real-time WS event emitter — tool_call_start / tool_call_end only */
   send: (msg: object) => void;
@@ -49,29 +47,26 @@ export class AgentLoopRunner {
    */
   async run(
     userMessage: string,
-    memory: SessionMemory,
+    memory: ProviderMemory,
     tools: MCPTool[],
-    locale?: string
+    locale?: string,
   ): Promise<{ finalText: string }> {
-    memory.appendUserMessage(userMessage);
+    this.deps.adapter.appendUserMessage(memory, userMessage);
 
     for (let i = 0; i < this.maxIterations; i++) {
       if (this.cancelled) throw new AgentCancelled();
 
       console.log(`[AgentLoop] step ${i + 1}/${this.maxIterations} (history=${memory.getLength()})`);
 
-      const contents = memory.getContents();
-      const hint = memory.getKeyFactsHint();
-
-      let resp: Awaited<ReturnType<typeof this.deps.gemini.chatStep>>;
+      let resp;
       try {
-        resp = await this.deps.gemini.chatStep(contents, tools, locale, hint);
+        resp = await this.deps.adapter.chatStep(memory, tools, locale);
       } catch (error) {
         const msg = error instanceof Error ? error.message : String(error);
-        throw new Error(`Gemini error at step ${i + 1}: ${msg}`);
+        throw new Error(`LLM error at step ${i + 1}: ${msg}`);
       }
 
-      // Gemini requested a tool call
+      // Tool requested — append assistant turn, execute tool, append tool result, continue
       if (resp.functionCall) {
         const { name, args } = resp.functionCall;
 
@@ -80,20 +75,19 @@ export class AgentLoopRunner {
         const callId = generateMessageId();
         console.log(`[AgentLoop] calling tool: ${name}`, args);
         this.deps.send({ type: 'tool_call_start', id: callId, toolName: name, timestamp: Date.now() });
-
-        // Preserve the raw model Content (thoughtSignature, etc.) when available
-        if (resp.modelContent) {
-          memory.appendModelContent(resp.modelContent);
-        } else {
-          memory.appendFunctionCall(name, args);
-        }
+        this.deps.adapter.appendAssistantToolCall(memory, resp.functionCall, resp.raw);
 
         const toolResult = await this.callToolWithTimeout(name, args);
 
-        if (this.cancelled) throw new AgentCancelled();
+        if (this.cancelled) {
+          // Roll back the dangling assistant(toolUse) so the memory stays valid
+          // for the next run on this session (Bedrock invariant).
+          this.deps.adapter.rollbackLastToolCall?.(memory);
+          throw new AgentCancelled();
+        }
 
         const resultText = toolResult.content[0]?.text ?? '';
-        memory.appendFunctionResponse(name, resultText, !!toolResult.isError);
+        this.deps.adapter.appendToolResult(memory, name, resultText, !!toolResult.isError);
 
         this.deps.send({
           type: 'tool_call_end',
@@ -107,11 +101,7 @@ export class AgentLoopRunner {
 
       // Plain text response — loop complete
       const finalText = resp.text ?? '';
-      if (resp.modelContent) {
-        memory.appendModelContent(resp.modelContent);
-      } else {
-        memory.appendModelText(finalText);
-      }
+      this.deps.adapter.appendAssistantText(memory, finalText, resp.raw);
       console.log('[AgentLoop] done');
       return { finalText };
     }
@@ -121,7 +111,7 @@ export class AgentLoopRunner {
 
   private async callToolWithTimeout(
     name: string,
-    args: Record<string, unknown>
+    args: Record<string, unknown>,
   ): Promise<MCPToolResult> {
     const startedAt = Date.now();
     const timeout = new Promise<MCPToolResult>((resolve) =>
@@ -133,11 +123,10 @@ export class AgentLoopRunner {
             isError: true,
           });
         },
-        this.toolTimeoutMs
-      )
+        this.toolTimeoutMs,
+      ),
     );
     try {
-      // Pass the same timeout to the MCP SDK so the underlying request is also aborted
       const toolCall = this.deps.mcp.callTool(name, args, { timeoutMs: this.toolTimeoutMs });
       const result = await Promise.race([toolCall, timeout]);
       const elapsed = Date.now() - startedAt;

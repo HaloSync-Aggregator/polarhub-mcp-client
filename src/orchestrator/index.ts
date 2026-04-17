@@ -11,9 +11,8 @@
 
 import { mcpClient, type MCPToolResult } from '../mcp/client.js';
 import { createLLMProvider, type LLMProvider, type ConversationContext } from '../llm/index.js';
-import { GeminiProvider } from '../llm/gemini.js';
 import { AgentLoopRunner, AgentCancelled } from './agentLoop.js';
-import { SessionMemory } from './sessionMemory.js';
+import type { AgentLoopAdapter, ProviderMemory } from '../llm/agentLoopAdapter.js';
 import { t, getActionDescription, type Locale } from '../i18n/index.js';
 
 const IDLE_SESSION_MS = 30 * 60 * 1000; // 30 min
@@ -163,13 +162,18 @@ function extractMetadata(result: MCPToolResult): Record<string, unknown> | undef
 
 export class Orchestrator {
   private llmProvider: LLMProvider;
+  private agentLoopAdapter: AgentLoopAdapter | null;
   private conversationContext: Map<string, ConversationContext> = new Map();
-  private sessions: Map<string, SessionMemory> = new Map();
+  private sessions: Map<string, ProviderMemory> = new Map();
   private activeRunners: Map<string, AgentLoopRunner> = new Map();
   private cleanupInterval?: NodeJS.Timeout;
 
   constructor() {
     this.llmProvider = createLLMProvider();
+    this.agentLoopAdapter = this.llmProvider.createAgentLoopAdapter?.() ?? null;
+    if (!this.agentLoopAdapter) {
+      console.warn('[Orchestrator] Selected LLM provider does not implement agent loop — chat messages will fail');
+    }
   }
 
   async initialize(): Promise<void> {
@@ -235,16 +239,23 @@ export class Orchestrator {
     const safeSend = send ?? noop;
 
     try {
+      if (!this.agentLoopAdapter) {
+        return {
+          message: `Agent loop not supported for LLM provider. Configure LLM_PROVIDER=gemini or bedrock.`,
+          error: 'agent_loop_unsupported',
+        };
+      }
+
       const tools = mcpClient.getTools();
 
       let memory = this.sessions.get(sessionId);
       if (!memory) {
-        memory = new SessionMemory({ maxLength: MAX_HISTORY_LENGTH });
+        memory = this.agentLoopAdapter.createMemory({ maxLength: MAX_HISTORY_LENGTH });
         this.sessions.set(sessionId, memory);
       }
 
       const runner = new AgentLoopRunner(
-        { gemini: this.llmProvider as GeminiProvider, mcp: mcpClient, send: safeSend },
+        { adapter: this.agentLoopAdapter, mcp: mcpClient, send: safeSend },
         { maxIterations: MAX_AGENT_ITERATIONS, toolTimeoutMs: TOOL_TIMEOUT_MS }
       );
       this.activeRunners.set(sessionId, runner);

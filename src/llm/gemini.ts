@@ -14,6 +14,9 @@ import {
 } from './provider.js';
 import { config } from '../config/index.js';
 import { t } from '../i18n/strings.js';
+import { AGENT_LOOP_PREAMBLE } from '../orchestrator/keyFacts.js';
+import type { AgentLoopAdapter } from './agentLoopAdapter.js';
+import { GeminiChatStepAdapter } from './geminiAdapter.js';
 
 /**
  * Recursively strip JSON Schema keys unsupported by Gemini API.
@@ -83,23 +86,7 @@ export class GeminiProvider implements LLMProvider {
   }> {
     const functionDeclarations = this.toFunctionDeclarations(tools);
     const baseSystem = buildIntentParserPrompt(tools, (locale ?? 'en') as any);
-    const agentLoopPreamble = `## Agent Loop Mode (CRITICAL — read this first)
-
-You are running in multi-step agent loop mode. You can — and SHOULD — call tools multiple times in sequence to fully satisfy the user's request.
-
-**After you receive a functionResponse, decide:**
-1. Does the user's request need MORE tool calls to be complete? → call the next tool immediately.
-2. Have all necessary tools been called AND do you have enough data to answer? → reply with plain text.
-
-**Rules:**
-- Chain tools according to the "Workflow Sequence Rules" below (e.g., flight_search → flight_price → seat_availability → select_seat → flight_book).
-- Never stop early with text like "now I'll call X" — just call X via function calling.
-- Only reply with plain text when the WHOLE request is complete, or when you need user clarification.
-- Use IDs from prior tool results shown in [Session context] — never fabricate IDs.
-- If a tool returned isError, decide: retry with corrected args, try a different tool, or explain the failure in plain text.
-
-`;
-    const composed = `${agentLoopPreamble}${baseSystem}`;
+    const composed = `${AGENT_LOOP_PREAMBLE}${baseSystem}`;
     const systemInstruction = extraHint ? `${composed}\n\n${extraHint}` : composed;
 
     const modelWithTools = this.genAI.getGenerativeModel({
@@ -267,5 +254,9 @@ You are running in multi-step agent loop mode. You can — and SHOULD — call t
       console.error('Gemini generateResponse error:', error);
       return t(context.locale ?? 'en', 'errors.generateError');
     }
+  }
+
+  createAgentLoopAdapter(): AgentLoopAdapter {
+    return new GeminiChatStepAdapter(this);
   }
 }

@@ -110,7 +110,7 @@ PolarHub MCP Client는 [Model Context Protocol(MCP)](https://modelcontextprotoco
 
 ## 동작 원리
 
-사용자 메시지 한 건이 들어오면 서버는 **에이전트 루프**를 돕니다. Gemini가 호출할 tool을 결정하고, MCP 클라이언트가 실행하고, 결과가 다시 같은 대화에 피드되어 Gemini가 최종 텍스트 응답을 낼 때까지 반복됩니다. 즉, 한 번의 사용자 메시지로 `flight_search → flight_price → flight_book` 같은 다단계 tool 체인이 자동으로 수행됩니다.
+사용자 메시지 한 건이 들어오면 서버는 **에이전트 루프**를 돕니다. LLM이 호출할 tool을 결정하고, MCP 클라이언트가 실행하고, 결과가 다시 같은 대화에 피드되어 LLM이 최종 텍스트 응답을 낼 때까지 반복됩니다. 한 번의 사용자 메시지로 `flight_search → flight_price → flight_book` 같은 다단계 tool 체인이 자동으로 수행됩니다. **Gemini와 AWS Bedrock** 두 provider 모두 `AgentLoopAdapter` 패턴으로 지원하며, OpenAI 에이전트 루프는 다음 PR에서 추가 예정입니다.
 
 ### 1단계: 동적 Tool Discovery
 
@@ -118,7 +118,12 @@ PolarHub MCP Client는 [Model Context Protocol(MCP)](https://modelcontextprotoco
 
 ### 2단계: Agent Loop
 
-모든 사용자 메시지는 `AgentLoopRunner` (`src/orchestrator/agentLoop.ts`)를 통해 처리됩니다:
+모든 사용자 메시지는 `AgentLoopRunner` (`src/orchestrator/agentLoop.ts`)를 통해 처리됩니다. 이 runner는 provider-agnostic이며, 각 LLM provider가 구현하는 `AgentLoopAdapter` (`src/llm/agentLoopAdapter.ts`)와만 통신합니다:
+
+- **GeminiChatStepAdapter** — Gemini `generateContent` + function calling 래핑. thinking 모델 호환을 위해 `thoughtSignature` 필드를 보존합니다.
+- **BedrockChatStepAdapter** — AWS Bedrock Converse API 래핑. `toolUseId`로 `toolUse`↔`toolResult` 페어링을 관리합니다.
+
+양쪽 모두 동일한 루프 동작을 공유합니다:
 
 ```
 loop (최대 5회):
@@ -144,12 +149,16 @@ MCP Client → POST /mcp
 
 ### 3단계: 세션 단기 메모리
 
-`SessionMemory` (`src/orchestrator/sessionMemory.ts`)가 WebSocket 세션별 상태를 보관합니다:
+각 provider가 자체 메모리 구현을 가지며, 공통 `ProviderMemory` 인터페이스 뒤에 숨겨져 있습니다:
 
-- **경계가 있는 Gemini `Content[]`** — 최근 약 40턴만 유지. 프루닝 시 `functionCall`/`functionResponse` 짝이 끊기지 않도록 처리합니다.
-- **Key facts 자동 추출** — tool 결과에서 `sessionId`, `orderId`, `transactionId`, `offerId`, `refundQuoteId` 등을 추출합니다. 다음 스텝에서 Gemini `systemInstruction`에 다시 주입되어 모델이 실제 ID를 사용하도록 유도합니다 (환각 방지).
+- **`GeminiSessionMemory`** (`src/orchestrator/sessionMemory.ts`) — 경계 있는 `Content[]`, `functionCall`/`functionResponse` 짝을 보존하는 프루닝, 원본 candidate `Content`를 그대로 저장해 `thoughtSignature` 유지.
+- **`BedrockSessionMemory`** (`src/orchestrator/bedrockSessionMemory.ts`) — 경계 있는 `ConverseMessage[]`, `pendingToolUseId`로 `toolUse`/`toolResult` 페어링, Bedrock이 요구하는 user/assistant 엄격 교대와 tool 페어 무결성을 프루닝 시 유지.
+
+Provider 공용 (`src/orchestrator/keyFacts.ts`):
+
+- **Key facts 자동 추출** — tool 결과에서 `sessionId`, `orderId`, `transactionId`, `offerId`, `refundQuoteId` 등을 추출해 다음 스텝 시스템 프롬프트에 주입 → 모델이 실제 ID를 사용하도록 유도 (환각 방지).
+- **Agent loop preamble** — 모델이 요청이 완전히 충족될 때까지 tool을 연쇄 호출하도록 지시하는 공유 시스템 프롬프트 전문.
 - **Idle 세션 정리** — 30분 이상 비활성 세션은 5분 주기로 정리됩니다.
-- **thoughtSignature 보존** — SDK가 반환한 원본 candidate `Content`를 그대로 저장해 Gemini thinking 계열 모델이 요구하는 추론 서명이 다음 턴까지 유지됩니다.
 
 ---
 
@@ -164,8 +173,11 @@ MCP Client → POST /mcp
 | 모듈 | 파일 | 역할 |
 |------|------|------|
 | **Orchestrator** | `src/orchestrator/index.ts` | 세션별 상태 관리, idle 세션 정리, 사용자 메시지를 AgentLoopRunner로 디스패치 |
-| **AgentLoopRunner** | `src/orchestrator/agentLoop.ts` | Gemini + MCP tool 루프. 취소 가능, 최대 반복 횟수 제한, tool 타임아웃 |
-| **SessionMemory** | `src/orchestrator/sessionMemory.ts` | 경계 있는 Gemini `Content[]`, key-facts 추출, `thoughtSignature` 보존 |
+| **AgentLoopRunner** | `src/orchestrator/agentLoop.ts` | Provider-agnostic MCP tool 루프. 취소 가능, 최대 반복 횟수, tool 타임아웃 |
+| **AgentLoopAdapter** | `src/llm/agentLoopAdapter.ts` | 각 provider가 구현하는 계약. 루프가 provider 세부를 알 필요 없게 함 |
+| **GeminiChatStepAdapter** | `src/llm/geminiAdapter.ts` | Gemini 구현 — Content[] 히스토리, thoughtSignature 보존 |
+| **BedrockChatStepAdapter** | `src/llm/bedrockAdapter.ts` | Bedrock Converse 구현 — ConverseMessage[] 히스토리, toolUseId 페어링 |
+| **Session memories** | `src/orchestrator/sessionMemory.ts`, `bedrockSessionMemory.ts` | 경계 있는 provider별 히스토리 + key-facts 추출 |
 | **MCP Client** | `src/mcp/client.ts` | MCP 서버 연결, Tool 호출 (timeoutMs 옵션 지원), 정적 헤더 인증, 재연결 |
 | **LLM Provider** | `src/llm/provider.ts` | 3개 LLM 제공자 공통 인터페이스 + 동적 프롬프트 빌더 |
 | **WebSocket** | `src/server/websocket.ts` | 클라이언트 세션 관리, tool 이벤트 실시간 전송, 메타데이터 전파 |
@@ -206,9 +218,11 @@ Tool 이름, 파라미터, 설명이 전부 MCP 서버에서 옵니다. 새 Tool
 실행 (order_confirm)  → "변경 완료!"
 ```
 
-### Agent Loop — 메시지 1건당 다중 tool 체인
+### Agent Loop — 메시지 1건당 다중 tool 체인 (provider-agnostic)
 
-`AgentLoopRunner`는 한 번의 사용자 메시지로 여러 tool을 연쇄 호출합니다:
+`AgentLoopRunner`는 provider-neutral로 모든 `AgentLoopAdapter`와 동작합니다. 현재 **Gemini**와 **AWS Bedrock (Converse API)**이 adapter로 지원되며, OpenAI는 여전히 레거시 `processAction` 경로를 쓰고 다음 PR에서 adapter를 추가합니다.
+
+한 번의 사용자 메시지로 여러 tool을 연쇄 호출합니다:
 
 ```
 "5/15일 인천→싱가폴 편도 성인 1명 가장 저렴한 항공편 예약까지 완료해줘"
@@ -379,8 +393,8 @@ curl http://localhost:3000/health
 | `GEMINI_API_KEY` | Gemini | API 키 |
 | `GEMINI_MODEL` | Gemini | 모델명 (`gemini-2.0-flash`, `gemini-3-flash-preview` 등) |
 | `BEDROCK_API_KEY` | Bedrock | Bedrock Converse API용 Bearer 토큰 |
-| `AWS_REGION` | Bedrock | AWS 리전 |
-| `BEDROCK_MODEL` | Bedrock | 모델 ID |
+| `AWS_REGION` | Bedrock | AWS 리전. **inference profile의 리전 계열과 일치해야 함** — `apac.*` 프로파일은 Asia Pacific 리전 필요 (`ap-northeast-2`, `ap-northeast-1`, `ap-southeast-1` 등), `us.*` 프로파일은 US 리전 필요. 기본값: `us-east-1`. |
+| `BEDROCK_MODEL` | Bedrock | Inference profile ID (권장) 또는 모델 ID. 최신 Claude 모델은 대부분 inference profile이 필수 — 예: `apac.anthropic.claude-sonnet-4-20250514-v1:0` 또는 `us.anthropic.claude-sonnet-4-5-20250929-v1:0`. 순수 모델 ID는 보통 `model identifier is invalid` 또는 `on-demand throughput isn't supported` 에러를 유발. |
 
 > 참고: `.env.example`은 `GEMINI_MODEL=gemini-2.0-flash`를 예시로 제공하고, 환경 변수를 완전히 생략했을 때 코드의 runtime fallback은 `gemini-3-flash-preview`입니다.
 
@@ -529,10 +543,20 @@ polarhub-mcp-client/
 │   │   └── bedrock.ts            # AWS Bedrock (Bearer Token, HTTP 직접 호출)
 │   ├── mcp/
 │   │   └── client.ts             # MCP 클라이언트 — Streamable HTTP + 정적 헤더 인증 + 재연결 + timeoutMs 옵션
+│   ├── llm/
+│   │   ├── provider.ts           # LLMProvider 인터페이스 + 동적 프롬프트 빌더
+│   │   ├── agentLoopAdapter.ts   # Agent loop용 provider-agnostic adapter 계약
+│   │   ├── gemini.ts             # Gemini provider (스키마 정제 + chatStep + adapter factory)
+│   │   ├── geminiAdapter.ts      # GeminiChatStepAdapter
+│   │   ├── bedrock.ts            # Bedrock provider (Converse API + chatStep + adapter factory)
+│   │   ├── bedrockAdapter.ts     # BedrockChatStepAdapter
+│   │   └── openai.ts             # OpenAI (현재는 레거시 single-turn만)
 │   ├── orchestrator/
 │   │   ├── index.ts              # 세션별 상태 관리, idle 정리, AgentLoopRunner 디스패치
-│   │   ├── agentLoop.ts          # Gemini + MCP tool 루프 (취소 가능, 최대 반복, tool 타임아웃)
-│   │   └── sessionMemory.ts      # 경계 있는 Content[] history + key facts + thoughtSignature 보존
+│   │   ├── agentLoop.ts          # Provider-agnostic agent loop (취소 가능, 최대 반복, tool 타임아웃)
+│   │   ├── keyFacts.ts           # 공유 key-facts 추출 + agent-loop 시스템 preamble
+│   │   ├── sessionMemory.ts      # GeminiSessionMemory — 경계 있는 Content[] + thoughtSignature 보존
+│   │   └── bedrockSessionMemory.ts  # BedrockSessionMemory — ConverseMessage[] + toolUseId 페어링
 │   ├── server/
 │   │   ├── http-server.ts        # Express (정적파일) + Vite (HMR, 개발용)
 │   │   └── websocket.ts          # WebSocket 세션 관리 + 메타데이터 전파
@@ -651,6 +675,9 @@ curl http://localhost:3000/health
 | `LLM API key missing` | 환경변수 미설정 | `.env`에 선택한 `LLM_PROVIDER`에 맞는 API 키 설정 |
 | `Authentication failed` | 인증 정보 오류 | `POLARHUB_TENANT_ID`, `POLARHUB_API_SECRET` 확인 |
 | WebSocket 연결 끊김 | 서버 재시작 또는 네트워크 문제 | 브라우저 새로고침 (자동 재연결 시도) |
+| Bedrock `The provided model identifier is invalid` | `AWS_REGION`이 inference profile의 리전 계열과 불일치 | `apac.*` 프로파일은 `AWS_REGION=ap-northeast-2` (또는 다른 AP 리전), `us.*` 프로파일은 US 리전 사용 |
+| Bedrock `on-demand throughput isn't supported` | 순수 모델 ID 사용 (inference profile이 필요) | `BEDROCK_MODEL`을 `apac.anthropic.claude-sonnet-4-20250514-v1:0` 같은 inference profile ID로 변경 |
+| `Agent loop not supported for LLM provider` | `LLM_PROVIDER=openai`인데 agent loop 사용 | `gemini` 또는 `bedrock` 사용 — OpenAI adapter는 다음 PR |
 
 ---
 
