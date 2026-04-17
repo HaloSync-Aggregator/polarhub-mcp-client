@@ -110,25 +110,31 @@ This README is written for **external OTA developers who want to run PolarHub MC
 
 ## How It Works
 
-Step-by-step breakdown of what happens when a user sends a message.
+When a user sends a message, the server runs an **agent loop**: Gemini decides which tools to call, the MCP client executes them, and the results feed back into the same conversation until Gemini produces a final text response. A single user message can trigger a chain of tool calls (e.g. `flight_search → flight_price → flight_book`) without any extra round-trips to the user.
 
-### Step 1: Intent Parsing
+### Step 1: Dynamic Tool Discovery
 
-The LLM analyzes natural language to determine **which MCP Tool to call**.
+At startup the MCP client fetches the tool catalog from the MCP server and converts each tool's JSON Schema into a Gemini `FunctionDeclaration`. Tool names, descriptions, and parameter schemas are never hardcoded — when the server adds a tool, it's available in the next chat with no client changes.
+
+### Step 2: Agent Loop
+
+Each user message drives the `AgentLoopRunner` (`src/orchestrator/agentLoop.ts`):
 
 ```
-User: "Round trip to Singapore, depart April 15, return April 20"
-                    ↓
-LLM Analysis: tool = "flight_search"
-              params = { origin: "ICN", destination: "SIN",
-                         departureDate: "2026-04-15", returnDate: "2026-04-20" }
+loop (max 5 iterations):
+  1. call Gemini with the full conversation + tool declarations
+  2. if Gemini returns a functionCall:
+       → emit tool_call_start (WebSocket)
+       → execute the tool via MCP client (90s timeout by default)
+       → emit tool_call_end
+       → append the functionResponse to history, continue the loop
+  3. if Gemini returns plain text:
+       → send assistant_message, loop is done
 ```
 
-The key is **Dynamic Tool Discovery**. Tool definitions aren't hardcoded — they're fetched from the MCP server at startup and used to auto-generate LLM prompts. When new Tools are added to the MCP server, they're automatically available without client changes.
-
-### Step 2: MCP Tool Invocation
-
-The selected Tool is executed on the MCP server via Streamable HTTP transport. PolarHub credentials are passed through as `X-PolarHub-*` HTTP headers.
+- **Cancellable** — when a user sends a new message mid-loop, the previous loop is pre-empted silently.
+- **Tool timeouts feed back to the model** — a timed-out tool becomes a `functionResponse` with `isError: true`, so Gemini can retry with different arguments or explain the failure.
+- **Gemini API errors terminate the loop** and surface as a WebSocket `error` event.
 
 ```
 MCP Client → POST /mcp
@@ -136,9 +142,14 @@ MCP Client → POST /mcp
   Body: { method: "tools/call", params: { name: "flight_search", arguments: {...} } }
 ```
 
-### Step 3: Result Summarization
+### Step 3: Session Short-Term Memory
 
-The LLM summarizes results in natural language (prices with comma separators, 24-hour time format) and delivers them to the user as a text response.
+`SessionMemory` (`src/orchestrator/sessionMemory.ts`) keeps state for each WebSocket session:
+
+- **Bounded Gemini `Content[]`** — the most recent ~40 turns; pruning never splits a `functionCall` / `functionResponse` pair.
+- **Key facts extraction** — every tool result is scanned for `sessionId`, `orderId`, `transactionId`, `offerId`, `refundQuoteId`, etc. These are re-injected into Gemini's `systemInstruction` on the next step so the model uses real IDs instead of hallucinating.
+- **Idle eviction** — sessions inactive for 30 minutes are cleared on a 5-minute sweep.
+- **thoughtSignature preservation** — raw candidate `Content` is stored as-is so signatures required by Gemini thinking models survive multi-turn replay.
 
 ---
 
@@ -152,20 +163,22 @@ The LLM summarizes results in natural language (prices with comma separators, 24
 
 | Module | File | Role |
 |--------|------|------|
-| **Orchestrator** | `src/orchestrator/index.ts` | Flow control: intent parsing → tool call → summarization → session state |
-| **MCP Client** | `src/mcp/client.ts` | MCP server connection, tool calls, static header auth, reconnection |
+| **Orchestrator** | `src/orchestrator/index.ts` | Per-session state, idle eviction, dispatches each user message to an AgentLoopRunner |
+| **AgentLoopRunner** | `src/orchestrator/agentLoop.ts` | Gemini + MCP tool loop; cancellable, max-iteration guarded, per-tool timeout |
+| **SessionMemory** | `src/orchestrator/sessionMemory.ts` | Bounded Gemini `Content[]`, key-facts extraction, `thoughtSignature` preservation |
+| **MCP Client** | `src/mcp/client.ts` | MCP server connection, tool calls (with timeout option), static header auth, reconnection |
 | **LLM Provider** | `src/llm/provider.ts` | Unified interface for 3 LLM providers + dynamic prompt builder |
-| **WebSocket** | `src/server/websocket.ts` | Client session management, message routing, metadata propagation |
+| **WebSocket** | `src/server/websocket.ts` | Client session management, real-time tool-event emission, metadata propagation |
 
 ### Data Flow
 
 1. **User** → Natural language message (WebSocket)
-2. **Orchestrator** → Request LLM intent parsing (which Tool to call?)
-3. **LLM** → Return tool name + parameters
-4. **MCP Client** → Call Tool on MCP server (Streamable HTTP)
-5. **MCP Server** → Call PolarHub NDC API → Return result
-6. **Orchestrator** → Request LLM result summarization → Generate user-friendly text
-7. **Frontend** → Display text response
+2. **Orchestrator** → Load / create `SessionMemory`, cancel any prior loop, instantiate `AgentLoopRunner`
+3. **AgentLoopRunner** → Call Gemini with Content[] history + tool declarations + key-facts hint
+4. **Gemini** → Either a `functionCall` or a final text response
+5. **If functionCall** → Execute on MCP server via Streamable HTTP → Append `functionResponse` to `SessionMemory` → loop back to step 3
+6. **If text** → Emit `assistant_message`, loop ends
+7. **Frontend** → Render tool progress (`tool_call_start`/`tool_call_end`) in real time, then display final text response
 
 ---
 
@@ -193,19 +206,46 @@ Preview (order_prepare) → "Proceed with this change?" [Confirm/Cancel]
 Execute (order_confirm) → "Change complete!"
 ```
 
-### Stateful Session — Multi-Step Workflow State Tracking
+### Agent Loop — Multi-Tool Chaining Per Message
+
+`AgentLoopRunner` lets a single user message trigger a chain of tool calls:
+
+```
+"Book the cheapest Incheon → Singapore flight on 5/15 for 1 adult"
+  → flight_search        (step 1)
+  → flight_price         (step 2)
+  → passenger_form       (step 3)
+  → flight_book          (step 4)
+  → final text response  (step 5)
+```
+
+Tunable via environment variables:
+
+- `MCP_MAX_ITERATIONS` (default `5`) — safety cap against runaway loops.
+- `MCP_TOOL_TIMEOUT_MS` (default `90000`) — forwarded to the MCP SDK and enforced via `Promise.race` so our deadline and the SDK request share the same limit.
+
+Tool errors (timeout, `isError: true`, unknown tool name) are returned to Gemini as `functionResponse` content — the model can retry with different arguments or fall back to a plain text answer. Only Gemini API errors terminate the loop and surface as a WebSocket `error` event.
+
+### Stateful Session — Short-Term Memory Per Connection
+
+`SessionMemory` holds per-session state for the agent loop:
 
 ```typescript
-// Context tracked per session by Orchestrator
 {
-  mcpSessionId: "...",              // Prime Booking session
-  postBookingTransactionId: "...",  // Post-Booking transaction
-  postBookingOrderId: "...",        // Currently managed order
-  lastToolResult: {...},            // Previous tool result (used for next call)
+  contents: Content[],       // Gemini Content[] — bounded, safely pruned
+  keyFacts: {
+    mcpSessionId?, postBookingTransactionId?, postBookingOrderId?,
+    lastToolCalled?, lastToolKeyIds?,  // offerId / responseId / refundQuoteId / ...
+  },
+  lastAccessedAt,
 }
 ```
 
-Session IDs, transaction IDs, and order IDs are automatically extracted from each Tool call result. When a user says "change my seat," the system automatically determines which order and segment from previous context.
+- **Bounded history** — default 40 entries; pruning keeps `functionCall`/`functionResponse` pairs intact to satisfy Gemini's invariants.
+- **Key facts auto-injected** — every `functionResponse` is scanned for IDs. On the next step `getKeyFactsHint()` appends them to Gemini's `systemInstruction` so the model never has to guess an ID it already saw.
+- **Idle eviction** — 30-minute TTL, swept every 5 minutes.
+- **`thoughtSignature` preservation** — raw `candidates[0].content` is stored verbatim via `appendModelContent()`, required by `gemini-3-flash-preview` and other thinking models.
+- **Legacy `ConversationContext`** (`mcpSessionId`, `postBookingTransactionId`, …) is still maintained for the `processAction` path that bypasses the agent loop.
 
 ---
 
@@ -350,6 +390,9 @@ curl http://localhost:3000/health
 |----------|---------|-------------|
 | `PORT` | `3000` | Server port |
 | `DEBUG_PROMPTS` | `false` | Print LLM prompts to console |
+| `MCP_TOOL_TIMEOUT_MS` | `90000` | Per-tool-call timeout (ms). Applied to both our `Promise.race` guard and the MCP SDK request. Raise it for slow GDS/NDC endpoints. |
+| `MCP_MAX_ITERATIONS` | `5` | Max agent-loop iterations per user message. Guards against runaway tool chains. |
+| `DEFAULT_LOCALE` | `en` | Server default locale if the browser language and URL parameter are both absent. |
 
 ---
 
@@ -401,9 +444,11 @@ polarhub-mcp-client/
 │   │   ├── gemini.ts             # Google Gemini (schema sanitization included)
 │   │   └── bedrock.ts            # AWS Bedrock (Bearer Token, direct HTTP calls)
 │   ├── mcp/
-│   │   └── client.ts             # MCP client — Streamable HTTP + static header auth + reconnection
+│   │   └── client.ts             # MCP client — Streamable HTTP + static header auth + reconnection + timeoutMs option
 │   ├── orchestrator/
-│   │   └── index.ts              # Core engine — intent parsing → tool call → summarization → state mgmt
+│   │   ├── index.ts              # Per-session state, idle eviction, dispatch to AgentLoopRunner
+│   │   ├── agentLoop.ts          # Gemini + MCP tool loop (cancellable, max iterations, tool timeout)
+│   │   └── sessionMemory.ts      # Bounded Content[] history + key facts + thoughtSignature preservation
 │   ├── server/
 │   │   ├── http-server.ts        # Express (static files) + Vite (HMR, dev mode)
 │   │   └── websocket.ts          # WebSocket session management + metadata propagation
