@@ -54,6 +54,83 @@ export class GeminiProvider implements LLMProvider {
     });
   }
 
+  private toFunctionDeclarations(tools: MCPTool[]) {
+    return tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: stripUnsupportedSchemaKeys(tool.inputSchema as Record<string, unknown>) as any,
+    }));
+  }
+
+  /**
+   * Single-turn Gemini call for agent loop.
+   * Manages the full Content[] history externally; returns either a functionCall or text.
+   *
+   * Returns the raw model Content so callers can preserve fields like `thoughtSignature`
+   * (required by Gemini thinking models when echoing functionCall parts back).
+   *
+   * @param extraHint - Optional session context (key facts) appended to systemInstruction
+   */
+  async chatStep(
+    contents: Content[],
+    tools: MCPTool[],
+    locale?: string,
+    extraHint?: string | null
+  ): Promise<{
+    functionCall?: { name: string; args: Record<string, unknown> };
+    text?: string;
+    modelContent?: Content;
+  }> {
+    const functionDeclarations = this.toFunctionDeclarations(tools);
+    const baseSystem = buildIntentParserPrompt(tools, (locale ?? 'en') as any);
+    const agentLoopPreamble = `## Agent Loop Mode (CRITICAL — read this first)
+
+You are running in multi-step agent loop mode. You can — and SHOULD — call tools multiple times in sequence to fully satisfy the user's request.
+
+**After you receive a functionResponse, decide:**
+1. Does the user's request need MORE tool calls to be complete? → call the next tool immediately.
+2. Have all necessary tools been called AND do you have enough data to answer? → reply with plain text.
+
+**Rules:**
+- Chain tools according to the "Workflow Sequence Rules" below (e.g., flight_search → flight_price → seat_availability → select_seat → flight_book).
+- Never stop early with text like "now I'll call X" — just call X via function calling.
+- Only reply with plain text when the WHOLE request is complete, or when you need user clarification.
+- Use IDs from prior tool results shown in [Session context] — never fabricate IDs.
+- If a tool returned isError, decide: retry with corrected args, try a different tool, or explain the failure in plain text.
+
+`;
+    const composed = `${agentLoopPreamble}${baseSystem}`;
+    const systemInstruction = extraHint ? `${composed}\n\n${extraHint}` : composed;
+
+    const modelWithTools = this.genAI.getGenerativeModel({
+      model: config.llm.gemini.model,
+      tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+      systemInstruction,
+    });
+
+    const result = await modelWithTools.generateContent({
+      contents,
+      generationConfig: { temperature: 0.3 },
+    });
+
+    const response = result.response;
+    // Grab the raw candidate content so all fields (thoughtSignature, etc.) survive
+    const modelContent = (response.candidates?.[0]?.content ?? undefined) as Content | undefined;
+
+    const functionCall = response.functionCalls()?.[0];
+    if (functionCall) {
+      return {
+        functionCall: {
+          name: functionCall.name,
+          args: functionCall.args as Record<string, unknown>,
+        },
+        modelContent,
+      };
+    }
+
+    return { text: response.text() || undefined, modelContent };
+  }
+
   async parseIntent(
     userMessage: string,
     context: ConversationContext,
@@ -74,16 +151,7 @@ export class GeminiProvider implements LLMProvider {
       parts: [{ text: m.content }],
     }));
 
-    // Build Gemini function declarations from MCP tools
-    const functionDeclarations = availableTools.map(t => {
-      // Convert JSON Schema to Gemini format - recursively strip unsupported keys
-      const cleanSchema = stripUnsupportedSchemaKeys(t.inputSchema as Record<string, unknown>);
-      return {
-        name: t.name,
-        description: t.description,
-        parameters: cleanSchema as any,
-      };
-    });
+    const functionDeclarations = this.toFunctionDeclarations(availableTools);
 
     try {
       // Create model with function calling support
