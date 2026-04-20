@@ -166,44 +166,29 @@ export class WebSocketHandler {
     const { ws, sessionId } = client;
 
     try {
-      const toolCallId = generateMessageId();
+      // Pass real-time send callback so agent loop can emit tool events during execution
+      const result = await orchestrator.processMessage(
+        sessionId,
+        content,
+        client.locale,
+        (msg) => this.send(ws, msg as any)
+      );
 
-      // Send tool_call_start before processing (so frontend can show loading state)
-      // We don't know the tool name yet, but the id is generated for pairing with tool_call_end
-      const result = await orchestrator.processMessage(sessionId, content, client.locale);
-
-      // v3: 범용 metadata 저장 (sessionId 등 포함)
       if (result.metadata) {
         client.mcpMetadata = { ...client.mcpMetadata, ...result.metadata };
       }
 
-      if (result.toolCalled) {
-        // Send tool_call_start retroactively so frontend creates the system message
+      // Agent loop sends tool_call_start/end in real-time; send assistant_message only if non-empty
+      if (result.message) {
         this.send(ws, {
-          type: 'tool_call_start',
-          id: toolCallId,
-          toolName: result.toolCalled,
+          type: 'assistant_message',
+          id: generateMessageId(),
+          content: result.message,
           timestamp: Date.now(),
-        });
-
-        this.send(ws, {
-          type: 'tool_call_end',
-          id: toolCallId,
-          toolName: result.toolCalled,
-          success: result.toolSuccess ?? false,
-          timestamp: Date.now(),
-        });
+          ...(result.toolResult && { toolResult: result.toolResult }),
+          ...(result.metadata && { metadata: result.metadata }),
+        } as any);
       }
-
-      this.send(ws, {
-        type: 'assistant_message',
-        id: generateMessageId(),
-        content: result.message,
-        timestamp: Date.now(),
-        ...(result.toolResult && { toolResult: result.toolResult }),
-        ...(result.metadata && { metadata: result.metadata }),
-
-      } as any);
 
     } catch (error) {
       console.error('Error processing user message:', error);

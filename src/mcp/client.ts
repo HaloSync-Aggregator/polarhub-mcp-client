@@ -194,28 +194,35 @@ export class MCPClientManager {
     }
   }
 
-  async callTool(name: string, args: Record<string, unknown>): Promise<MCPToolResult> {
+  async callTool(
+    name: string,
+    args: Record<string, unknown>,
+    options?: { timeoutMs?: number }
+  ): Promise<MCPToolResult> {
     if (!this.client || !this.connected) {
       throw new Error('MCP client not connected');
     }
 
+    const startedAt = Date.now();
     console.log(`Calling MCP tool: ${name}`, JSON.stringify(args, null, 2));
 
     try {
-      const result = await this.client.callTool({
-        name,
-        arguments: args,
-      });
+      const result = await this.client.callTool(
+        { name, arguments: args },
+        undefined,
+        options?.timeoutMs ? { timeout: options.timeoutMs } : undefined,
+      );
 
-      console.log(`MCP tool ${name} result keys:`, Object.keys(result));
-      console.log(`MCP tool ${name} has structuredContent:`, 'structuredContent' in result);
+      const elapsed = Date.now() - startedAt;
+      console.log(`MCP tool ${name} completed in ${elapsed}ms; result keys:`, Object.keys(result));
       if ((result as any).structuredContent) {
         console.log(`MCP tool ${name} structuredContent keys:`, Object.keys((result as any).structuredContent));
       }
 
       return result as MCPToolResult;
     } catch (error) {
-      console.error(`Error calling MCP tool ${name}:`, error);
+      const elapsed = Date.now() - startedAt;
+      console.error(`Error calling MCP tool ${name} after ${elapsed}ms:`, error);
       throw error;
     }
   }

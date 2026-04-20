@@ -14,6 +14,9 @@ import {
 } from './provider.js';
 import { config } from '../config/index.js';
 import { t } from '../i18n/strings.js';
+import { AGENT_LOOP_PREAMBLE } from '../orchestrator/keyFacts.js';
+import type { AgentLoopAdapter } from './agentLoopAdapter.js';
+import { GeminiChatStepAdapter } from './geminiAdapter.js';
 
 /**
  * Recursively strip JSON Schema keys unsupported by Gemini API.
@@ -54,6 +57,67 @@ export class GeminiProvider implements LLMProvider {
     });
   }
 
+  private toFunctionDeclarations(tools: MCPTool[]) {
+    return tools.map(tool => ({
+      name: tool.name,
+      description: tool.description,
+      parameters: stripUnsupportedSchemaKeys(tool.inputSchema as Record<string, unknown>) as any,
+    }));
+  }
+
+  /**
+   * Single-turn Gemini call for agent loop.
+   * Manages the full Content[] history externally; returns either a functionCall or text.
+   *
+   * Returns the raw model Content so callers can preserve fields like `thoughtSignature`
+   * (required by Gemini thinking models when echoing functionCall parts back).
+   *
+   * @param extraHint - Optional session context (key facts) appended to systemInstruction
+   */
+  async chatStep(
+    contents: Content[],
+    tools: MCPTool[],
+    locale?: string,
+    extraHint?: string | null
+  ): Promise<{
+    functionCall?: { name: string; args: Record<string, unknown> };
+    text?: string;
+    modelContent?: Content;
+  }> {
+    const functionDeclarations = this.toFunctionDeclarations(tools);
+    const baseSystem = buildIntentParserPrompt(tools, (locale ?? 'en') as any);
+    const composed = `${AGENT_LOOP_PREAMBLE}${baseSystem}`;
+    const systemInstruction = extraHint ? `${composed}\n\n${extraHint}` : composed;
+
+    const modelWithTools = this.genAI.getGenerativeModel({
+      model: config.llm.gemini.model,
+      tools: functionDeclarations.length > 0 ? [{ functionDeclarations }] : undefined,
+      systemInstruction,
+    });
+
+    const result = await modelWithTools.generateContent({
+      contents,
+      generationConfig: { temperature: 0.3 },
+    });
+
+    const response = result.response;
+    // Grab the raw candidate content so all fields (thoughtSignature, etc.) survive
+    const modelContent = (response.candidates?.[0]?.content ?? undefined) as Content | undefined;
+
+    const functionCall = response.functionCalls()?.[0];
+    if (functionCall) {
+      return {
+        functionCall: {
+          name: functionCall.name,
+          args: functionCall.args as Record<string, unknown>,
+        },
+        modelContent,
+      };
+    }
+
+    return { text: response.text() || undefined, modelContent };
+  }
+
   async parseIntent(
     userMessage: string,
     context: ConversationContext,
@@ -74,16 +138,7 @@ export class GeminiProvider implements LLMProvider {
       parts: [{ text: m.content }],
     }));
 
-    // Build Gemini function declarations from MCP tools
-    const functionDeclarations = availableTools.map(t => {
-      // Convert JSON Schema to Gemini format - recursively strip unsupported keys
-      const cleanSchema = stripUnsupportedSchemaKeys(t.inputSchema as Record<string, unknown>);
-      return {
-        name: t.name,
-        description: t.description,
-        parameters: cleanSchema as any,
-      };
-    });
+    const functionDeclarations = this.toFunctionDeclarations(availableTools);
 
     try {
       // Create model with function calling support
@@ -199,5 +254,9 @@ export class GeminiProvider implements LLMProvider {
       console.error('Gemini generateResponse error:', error);
       return t(context.locale ?? 'en', 'errors.generateError');
     }
+  }
+
+  createAgentLoopAdapter(): AgentLoopAdapter {
+    return new GeminiChatStepAdapter(this);
   }
 }

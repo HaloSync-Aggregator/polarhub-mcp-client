@@ -11,7 +11,16 @@
 
 import { mcpClient, type MCPToolResult } from '../mcp/client.js';
 import { createLLMProvider, type LLMProvider, type ConversationContext } from '../llm/index.js';
+import { AgentLoopRunner, AgentCancelled } from './agentLoop.js';
+import type { AgentLoopAdapter, ProviderMemory } from '../llm/agentLoopAdapter.js';
 import { t, getActionDescription, type Locale } from '../i18n/index.js';
+
+const IDLE_SESSION_MS = 30 * 60 * 1000; // 30 min
+const CLEANUP_INTERVAL_MS = 5 * 60 * 1000; // 5 min
+const MAX_HISTORY_LENGTH = 40;
+
+const TOOL_TIMEOUT_MS = Number(process.env.MCP_TOOL_TIMEOUT_MS) || 90_000;
+const MAX_AGENT_ITERATIONS = Number(process.env.MCP_MAX_ITERATIONS) || 5;
 
 export interface OrchestratorResult {
   message: string;
@@ -153,33 +162,63 @@ function extractMetadata(result: MCPToolResult): Record<string, unknown> | undef
 
 export class Orchestrator {
   private llmProvider: LLMProvider;
+  private agentLoopAdapter: AgentLoopAdapter | null;
   private conversationContext: Map<string, ConversationContext> = new Map();
+  private sessions: Map<string, ProviderMemory> = new Map();
+  private activeRunners: Map<string, AgentLoopRunner> = new Map();
+  private cleanupInterval?: NodeJS.Timeout;
 
   constructor() {
     this.llmProvider = createLLMProvider();
+    this.agentLoopAdapter = this.llmProvider.createAgentLoopAdapter?.() ?? null;
+    if (!this.agentLoopAdapter) {
+      console.warn('[Orchestrator] Selected LLM provider does not implement agent loop — chat messages will fail');
+    }
   }
 
   async initialize(): Promise<void> {
     await mcpClient.connect();
+    this.cleanupInterval = setInterval(() => this.cleanupIdleSessions(), CLEANUP_INTERVAL_MS);
   }
 
   async shutdown(): Promise<void> {
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = undefined;
+    }
     await mcpClient.disconnect();
   }
 
+  private cleanupIdleSessions(): void {
+    const now = Date.now();
+    let evicted = 0;
+    for (const [sid, mem] of this.sessions) {
+      if (now - mem.lastAccessedAt > IDLE_SESSION_MS) {
+        this.activeRunners.get(sid)?.cancel();
+        this.sessions.delete(sid);
+        this.activeRunners.delete(sid);
+        this.conversationContext.delete(sid);
+        evicted++;
+      }
+    }
+    if (evicted > 0) {
+      console.log(`[Orchestrator] evicted ${evicted} idle session(s)`);
+    }
+  }
+
   /**
-   * Process user message
+   * Process user message via agent loop.
    *
-   * v3: Dynamic tool discovery
-   * 1. Get available tools from MCP server
-   * 2. Build dynamic prompt with tool info
-   * 3. Parse intent with LLM
-   * 4. Call MCP tool and return result
+   * v4: Gemini + MCP tool loop
+   * Gemini decides whether to call tools; loop continues until plain text response.
+   *
+   * @param send - Optional real-time WS event emitter for tool_call_start/end
    */
   async processMessage(
     sessionId: string,
     userMessage: string,
-    locale?: Locale
+    locale?: Locale,
+    send?: (msg: object) => void
   ): Promise<OrchestratorResult> {
     let context = this.conversationContext.get(sessionId);
     if (!context) {
@@ -188,156 +227,59 @@ export class Orchestrator {
     }
     if (locale) context.locale = locale;
 
-    context.history.push({
-      role: 'user',
-      content: userMessage,
-    });
-
+    context.history.push({ role: 'user', content: userMessage });
     if (context.history.length > 20) {
       context.history = context.history.slice(-20);
     }
 
+    // Cancel any in-progress loop for this session (user sent a new message)
+    this.activeRunners.get(sessionId)?.cancel();
+
+    const noop = () => {};
+    const safeSend = send ?? noop;
+
     try {
-      // v3: Dynamic tool discovery
-      const availableTools = mcpClient.getTools();
-
-      // Include context in user message for LLM
-      let enrichedMessage = userMessage;
-      if (context.mcpSessionId) {
-        enrichedMessage = `[Current sessionId: ${context.mcpSessionId}]\n${enrichedMessage}`;
-      }
-      if (context.postBookingOrderId) {
-        enrichedMessage = `[Current orderId: ${context.postBookingOrderId}]\n${enrichedMessage}`;
-      }
-      if (context.lastToolCalled) {
-        enrichedMessage = `[Last tool: ${context.lastToolCalled}]\n${enrichedMessage}`;
-      }
-      if (context.lastToolResult) {
-        const ids = Object.entries(context.lastToolResult)
-          .map(([k, v]) => `${k}=${v}`)
-          .join(', ');
-        if (ids) {
-          enrichedMessage = `[Available data from previous tool: ${ids}]\n${enrichedMessage}`;
-        }
-      }
-
-      const intent = await this.llmProvider.parseIntent(
-        enrichedMessage,
-        context,
-        availableTools
-      );
-
-      console.log('Parsed intent:', intent);
-
-      if (intent.clarifications && intent.clarifications.length > 0) {
-        const clarificationMessage = intent.clarifications.join('\n');
-        context.history.push({
-          role: 'assistant',
-          content: clarificationMessage,
-        });
-        return { message: clarificationMessage };
-      }
-
-      if (!intent.tool || !intent.params) {
-        const response = intent.response || await this.llmProvider.generateResponse(
-          userMessage,
-          context
-        );
-        context.history.push({
-          role: 'assistant',
-          content: response,
-        });
-        return { message: response };
-      }
-
-      // MCP server auto-manages transactionId, but pass context hints if available
-      const params = this.injectContextHints(intent.tool, intent.params, context);
-
-      let toolResult: MCPToolResult;
-      try {
-        toolResult = await mcpClient.callTool(intent.tool, params);
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-
-        // Clear expired sessionId on session-related errors
-        if (errorMessage.includes('Session not found') || errorMessage.includes('expired') || errorMessage.includes('session')) {
-          context.mcpSessionId = undefined;
-          console.log('[Orchestrator] Cleared expired mcpSessionId');
-          return {
-            message: t(context.locale ?? 'en', 'errors.sessionExpired'),
-            toolCalled: intent.tool,
-            toolSuccess: false,
-            error: errorMessage,
-          };
-        }
-
+      if (!this.agentLoopAdapter) {
         return {
-          message: `${t(context.locale ?? 'en', 'errors.toolCallError')}: ${errorMessage}`,
-          toolCalled: intent.tool,
-          toolSuccess: false,
-          error: errorMessage,
+          message: `Agent loop not supported for LLM provider. Configure LLM_PROVIDER=gemini or bedrock.`,
+          error: 'agent_loop_unsupported',
         };
       }
 
-      // v3: 범용 metadata 추출
-      const metadata = extractMetadata(toolResult);
+      const tools = mcpClient.getTools();
 
-      // Note: order_change retry is now handled by MCP server internally
-      // Bridge no longer needs retry logic
-
-      // Extract and store sessionId from tool result (Prime Booking)
-      if (metadata && typeof metadata.sessionId === 'string') {
-        context.mcpSessionId = metadata.sessionId;
-        console.log('Stored MCP sessionId:', context.mcpSessionId);
+      let memory = this.sessions.get(sessionId);
+      if (!memory) {
+        memory = this.agentLoopAdapter.createMemory({ maxLength: MAX_HISTORY_LENGTH });
+        this.sessions.set(sessionId, memory);
       }
 
-      // Extract and store transactionId from order_retrieve result (Post-Booking)
-      // order_retrieve 호출 후 transactionId를 저장하여 후속 작업에 재사용
-      if (intent.tool === 'order_retrieve' && metadata) {
-        if (typeof metadata.transactionId === 'string') {
-          context.postBookingTransactionId = metadata.transactionId;
-          console.log('Stored Post-Booking transactionId:', context.postBookingTransactionId);
-        }
-        // orderId도 저장하여 후속 작업에 사용
-        const data = metadata.data as Record<string, unknown> | undefined;
-        if (data && typeof data.orderId === 'string') {
-          context.postBookingOrderId = data.orderId;
-          console.log('Stored Post-Booking orderId:', context.postBookingOrderId);
+      const runner = new AgentLoopRunner(
+        { adapter: this.agentLoopAdapter, mcp: mcpClient, send: safeSend },
+        { maxIterations: MAX_AGENT_ITERATIONS, toolTimeoutMs: TOOL_TIMEOUT_MS }
+      );
+      this.activeRunners.set(sessionId, runner);
+
+      let result: { finalText: string };
+      try {
+        result = await runner.run(userMessage, memory, tools, locale);
+      } finally {
+        if (this.activeRunners.get(sessionId) === runner) {
+          this.activeRunners.delete(sessionId);
         }
       }
 
-      // Store last tool result key IDs for context enrichment
-      if (metadata && !toolResult.isError) {
-        context.lastToolResult = this.extractKeyIdsFromResult(intent.tool, metadata);
-        context.lastToolCalled = intent.tool;
+      if (result.finalText) {
+        context.history.push({ role: 'assistant', content: result.finalText });
       }
-
-      // Prepare data for summarization (exclude rawData to reduce size)
-      const dataForSummary = this.prepareDataForSummary(
-        toolResult.structuredContent || toolResult.content
-      );
-
-      const summary = await this.llmProvider.summarizeResult(
-        intent.tool,
-        dataForSummary,
-        context
-      );
-
-      context.history.push({
-        role: 'assistant',
-        content: summary,
-      });
-
-      return {
-        message: summary,
-        toolResult: toolResult.structuredContent as Record<string, unknown> | undefined,
-        metadata,
-        toolCalled: intent.tool,
-        toolSuccess: !toolResult.isError,
-      };
+      return { message: result.finalText };
 
     } catch (error) {
-      console.error('Orchestrator error:', error);
+      if (error instanceof AgentCancelled) {
+        // New message preempted this loop — return silently
+        return { message: '' };
+      }
+      console.error('[Orchestrator] agent loop error:', error);
       const errorMessage = error instanceof Error ? error.message : String(error);
       return {
         message: `${t(context?.locale ?? 'en', 'errors.processingError')}: ${errorMessage}`,
@@ -448,6 +390,9 @@ export class Orchestrator {
 
   clearContext(sessionId: string): void {
     this.conversationContext.delete(sessionId);
+    this.sessions.delete(sessionId);
+    this.activeRunners.get(sessionId)?.cancel();
+    this.activeRunners.delete(sessionId);
   }
 
   /**
