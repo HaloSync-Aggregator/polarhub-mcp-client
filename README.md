@@ -428,7 +428,7 @@ You need a PolarHub NDC platform account to run this client.
 
 ### How to get access
 
-Send an onboarding request to **contact@halosync.kr** with your company name and use case. The team will issue your Sandbox credentials.
+Send an onboarding request to **contact@halocorp.kr** with your company name and use case. The team will issue your Sandbox credentials.
 
 > Automated self-service onboarding is currently in progress.
 
