@@ -513,7 +513,7 @@ URI 기반 데이터 조회. Tool과 달리 파라미터 없이 URI만으로 접
 ### 접근 권한 받기 (셀프 온보딩)
 
 1. **https://albus.sandbox.halo-platform.net/sign-up** 에 접속합니다.
-2. 회사 이메일, 테넌트명, 선택사항인 IATA 번호(Production에서만 필수)를 입력합니다.
+2. 회사 이메일, 테넌트명, 선택사항인 IATA 번호를 입력합니다.
 3. `POLARHUB_TENANT_ID`와 Base64 `POLARHUB_API_SECRET`이 약 10분 이내에 발급됩니다 — `.env`에 `MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp`와 함께 설정하세요.
 
 ### Sandbox 제약사항
