@@ -426,11 +426,11 @@ X-PolarHub-API-Secret: {base64_secret}
 
 You need a PolarHub NDC platform account to run this client.
 
-### How to get access (self-serve, ~10 minutes)
+### How to get access (self-serve)
 
 1. Open **https://albus.sandbox.halo-platform.net/sign-up**
-2. Submit your company email, a tenant name, and an optional IATA number.
-3. Within ~10 minutes you receive `POLARHUB_TENANT_ID` and Base64 `POLARHUB_API_SECRET` — set both in `.env` alongside `MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp`.
+2. Submit your company email, a tenant name, and an optional IATA number (required for Production only).
+3. `POLARHUB_TENANT_ID` and Base64 `POLARHUB_API_SECRET` are issued within ~10 minutes — set both in `.env` alongside `MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp`.
 
 ### Sandbox limitations
 
