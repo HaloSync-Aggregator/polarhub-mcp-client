@@ -510,18 +510,25 @@ URI 기반 데이터 조회. Tool과 달리 파라미터 없이 URI만으로 접
 
 이 클라이언트를 실행하려면 PolarHub NDC 플랫폼 계정이 필요합니다.
 
-### 접근 권한 받기
+### 접근 권한 받기 (셀프 온보딩, 약 10분)
 
-**contact@halocorp.kr** 로 회사명과 사용 목적을 포함하여 온보딩 요청 메일을 보내주세요. Sandbox 인증 정보를 발급해드립니다.
+1. **https://albus.sandbox.halo-platform.net/sign-up** 에 접속합니다.
+2. 회사 이메일, 테넌트명, 선택사항인 IATA 번호를 입력합니다.
+3. 약 10분 이내에 `POLARHUB_TENANT_ID`와 Base64 `POLARHUB_API_SECRET`이 발급됩니다 — `.env`에 `MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp`와 함께 설정하세요.
 
-> 자동화된 셀프 서비스 온보딩은 현재 준비 중입니다.
+### Sandbox 제약사항
+
+- Sandbox 세션은 항공사가 제공하는 NDC 테스트 데이터를 사용합니다. 예약은 발권되지 않으며 IATA 정산에 영향을 주지 않습니다.
+- PolarHub MCP 서버는 현재 **Sandbox 전용**이며, 고정 헤더 키(`X-PolarHub-Tenant-ID` / `X-PolarHub-API-Secret`)로 인증합니다. 프로덕션 오픈 범위는 정의 중입니다.
+
+자세히 보기: [From Whitepaper to Working Code](https://halosync.kr/resources/from-whitepaper-to-working-code/)
 
 ### 필요한 인증 정보
 
 | 필요 정보 | 설명 | 발급 방법 |
 |----------|------|----------|
-| `POLARHUB_TENANT_ID` | 에이전시 식별자 | 온보딩 후 발급 |
-| `POLARHUB_API_SECRET` | API 시크릿 (Base64) | 온보딩 후 발급 |
+| `POLARHUB_TENANT_ID` | 에이전시 식별자 | 샌드박스 가입 포털에서 발급 |
+| `POLARHUB_API_SECRET` | API 시크릿 (Base64) | 샌드박스 가입 포털에서 발급 |
 
 > Sandbox 환경은 테스트용이며, 실제 항공편 예약이 이루어지지 않습니다.
 >
