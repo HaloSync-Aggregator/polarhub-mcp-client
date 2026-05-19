@@ -426,18 +426,25 @@ X-PolarHub-API-Secret: {base64_secret}
 
 You need a PolarHub NDC platform account to run this client.
 
-### How to get access
+### How to get access (self-serve)
 
-Send an onboarding request to **contact@halocorp.kr** with your company name and use case. The team will issue your Sandbox credentials.
+1. Open **https://albus.sandbox.halo-platform.net/sign-up**
+2. Submit your company email, a tenant name, and an optional IATA number.
+3. `POLARHUB_TENANT_ID` and Base64 `POLARHUB_API_SECRET` are issued within ~10 minutes — set both in `.env` alongside `MCP_SERVER_URL=https://mcp.sandbox.halo-platform.net/mcp`.
 
-> Automated self-service onboarding is currently in progress.
+### Sandbox limitations
+
+- Sandbox sessions are backed by airline-provided NDC test data. Bookings are not ticketed and do not affect IATA settlement.
+- The PolarHub MCP server is currently **Sandbox only** and authenticates via a fixed header key (`X-PolarHub-Tenant-ID` / `X-PolarHub-API-Secret`). Production opening is still being scoped.
+
+Learn more: [From Whitepaper to Working Code](https://halosync.kr/resources/from-whitepaper-to-working-code/)
 
 ### Required credentials
 
 | Required | Description | How to Get |
 |----------|-------------|------------|
-| `POLARHUB_TENANT_ID` | Agency identifier | Issued after onboarding |
-| `POLARHUB_API_SECRET` | API secret (Base64) | Issued after onboarding |
+| `POLARHUB_TENANT_ID` | Agency identifier | Issued by the sandbox sign-up portal |
+| `POLARHUB_API_SECRET` | API secret (Base64) | Issued by the sandbox sign-up portal |
 
 > The Sandbox environment is for testing only — no real flight bookings are made.
 >
